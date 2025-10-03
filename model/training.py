@@ -9,6 +9,7 @@ import datetime
 import matplotlib.pyplot as plt
 import io
 import json
+import pandas as pd
 
 from torchmetrics import F1Score, MatthewsCorrCoef, Precision, Recall, AUROC, \
 MeanMetric, AveragePrecision, PrecisionRecallCurve, MetricCollection
@@ -117,7 +118,12 @@ class LightningWrapper(L.LightningModule):
     
     def test_step(self, batch, batch_idx):
         loss, logits = self.classifier.predict(**batch)
-        self.test_preds.append((logits.squeeze(), batch['indices'].squeeze()))
+        mask = batch['labels'] != -1
+        for i in range(mask.shape[0]):
+            self.test_preds.append((logits[i][mask[i]].squeeze().cpu().numpy(),
+                                    batch['labels'][i][mask[i]].cpu().numpy(), 
+                                    int(batch['indices'][i].cpu().numpy())))
+        
         mean_loss = self.loss_metric(loss)
         self.log('test_loss', loss, logger=True, prog_bar=True, sync_dist=True)
         self.log('test_loss_mean', mean_loss, logger=True, prog_bar=True, sync_dist=True)
@@ -138,11 +144,6 @@ class LightningWrapper(L.LightningModule):
         else:
             epoch_metrics = self.test_epoch_metrics
             step_metrics = self.test_step_metrics
-
-        if mode == 'test':
-            preds, indices = zip(*self.test_preds)
-            torch.save(preds,f'{self.logdir}/preds.pt')
-            torch.save(indices,f'{self.logdir}/indices.pt')
         
         self.log_dict(epoch_metrics.compute(), prog_bar=True, logger=True, sync_dist=True)
 
@@ -214,7 +215,7 @@ def create_loss(args):
     
     return torch.nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([args.pos_weight]))
     
-def train_model(args, train, dev, test, model : LightningWrapper, logdir):
+def train_model(args, train, dev, test, model : LightningWrapper, logdir, fold):
     logger = TensorBoardLogger(logdir, name=f'tb_log')
 
     # Best model checkpoint
@@ -236,6 +237,8 @@ def train_model(args, train, dev, test, model : LightningWrapper, logdir):
     best = torch.load(f'{logdir}/best.ckpt')
     model.load_state_dict(best['state_dict'])
     test_metrics = trainer.test(model, test)
+    pred_df = pd.DataFrame.from_records(model.test_preds, columns=['logits', 'labels', 'df_index'])
+    pred_df.to_json(f"{logdir}/test_preds_fold_{fold}.json")
     print(test_metrics)
 
     return model, test_metrics
@@ -305,11 +308,11 @@ def run_training(args : Namespace, create_model_fn):
     })
 
     master_logdir = args.logdir
-    for i in range(meta.data['current_fold'], full_dataset.n_splits):
-        meta.data['current_fold'] = i
+    for fold in range(meta.data['current_fold'], full_dataset.n_splits):
+        meta.data['current_fold'] = fold
         meta.save(master_logdir)
-        print(f'Current fold: {i}')
-        train_ds, dev_ds, test_ds = full_dataset.get_fold(i)
+        print(f'Current fold: {fold}')
+        train_ds, dev_ds, test_ds = full_dataset.get_fold(fold)
         
         train = DataLoader(train_ds, args.batch_size, shuffle=True,
                             collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label),
@@ -327,7 +330,7 @@ def run_training(args : Namespace, create_model_fn):
         
         model, tokenizer = prepare_model(args, create_model_fn)
 
-        logdir = os.path.join(master_logdir, f'fold_{i}')
+        logdir = os.path.join(master_logdir, f'fold_{fold}')
         if not isinstance(model, LightningWrapper):
             model = LightningWrapper(args, model, step_metrics=step_metrics, epoch_metrics=epoch_metrics, ds_size=len(train), logdir=logdir)
 
@@ -339,11 +342,11 @@ def run_training(args : Namespace, create_model_fn):
         else:
             training_model = model.to(device)
     
-        training_model, test_metrics = train_model(args, train, dev, test, training_model, logdir)
+        training_model, test_metrics = train_model(args, train, dev, test, training_model, logdir, fold=fold)
         meta.data['test_metrics'].append(test_metrics[0])
 
-        print(f'Test metrics for fold {i}')
-        print(meta.data['test_metrics'][i])
+        print(f'Test metrics for fold {fold}')
+        print(meta.data['test_metrics'][fold])
         # Handled by checkpoints
         #save_model(args, model, args.n)
 
@@ -354,8 +357,8 @@ def run_training(args : Namespace, create_model_fn):
 
     print('Overall test metric averages')
     buffer = {k : 0 for k in meta.data['test_metrics'][-1].keys()}
-    for i in range(len(meta.data['test_metrics'])):
-        fold_metrics = meta.data['test_metrics'][i]
+    for fold in range(len(meta.data['test_metrics'])):
+        fold_metrics = meta.data['test_metrics'][fold]
         for k, v in fold_metrics.items():
             buffer[k] += v
 

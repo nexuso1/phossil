@@ -15,3 +15,5 @@ streamlit
 matplotlib
 scikit-learn
 plotly
+tensorboard
+torchvision
