@@ -1,0 +1,17 @@
+biopython
+torch
+datasets
+transformers
+numpy
+evaluate
+pandas
+torchmetrics
+torchtune
+torchao
+nglview
+kinase-library
+lightning
+streamlit
+matplotlib
+scikit-learn
+plotly
