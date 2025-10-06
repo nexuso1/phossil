@@ -236,9 +236,9 @@ def train_model(args, train, dev, test, model : LightningWrapper, logdir, fold):
     trainer = L.Trainer(logger=logger, callbacks=[best_callback, es_callback, chkpt_callback], max_epochs=args.epochs,
                         deterministic=True, log_every_n_steps=1,  accumulate_grad_batches=args.accum, strategy=strategy,
                         default_root_dir=logdir)
-    #trainer.fit(model, train, dev, ckpt_path=args.checkpoint_path)
-    #best = torch.load(f'{logdir}/best.ckpt')
-    #model.load_state_dict(best['state_dict'])
+    trainer.fit(model, train, dev, ckpt_path=args.checkpoint_path)
+    best = torch.load(f'{logdir}/best.ckpt')
+    model.load_state_dict(best['state_dict'])
     test_metrics = trainer.test(model, test)
 
     # Save predictions into a DataFrame
