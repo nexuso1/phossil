@@ -118,14 +118,17 @@ class LightningWrapper(L.LightningModule):
     
     def test_step(self, batch, batch_idx):
         loss, logits = self.classifier.predict(**batch)
+        # Relevant positions mask
         mask = batch['labels'] != -1
+        # Save test predictions
         for i in range(mask.shape[0]):
-            self.test_preds.append((logits[i][mask[i]].squeeze().cpu().numpy(),
-                                    batch['labels'][i][mask[i]].cpu().numpy(), 
-                                    int(batch['indices'][i].cpu().numpy())))
+            self.test_preds.append((logits[i][mask[i]].squeeze().cpu().numpy(), # prediction logits
+                                    batch['labels'][i][mask[i]].cpu().numpy(), # labels
+                                    (torch.nonzero(mask[i] ) - 1).squeeze().cpu().numpy(), # sequence indices (0-based) of relevant positions
+                                    int(batch['indices'][i].cpu().numpy()))) # index into the test set
         
+        # Log and compute metrics
         mean_loss = self.loss_metric(loss)
-        self.log('test_loss', loss, logger=True, prog_bar=True, sync_dist=True)
         self.log('test_loss_mean', mean_loss, logger=True, prog_bar=True, sync_dist=True)
         self._compute_metrics_step(logits.reshape(-1, self.classifier.n_labels), batch['labels'].view(-1, self.classifier.n_labels), 
                                    self.test_step_metrics, self.test_epoch_metrics)
@@ -233,11 +236,13 @@ def train_model(args, train, dev, test, model : LightningWrapper, logdir, fold):
     trainer = L.Trainer(logger=logger, callbacks=[best_callback, es_callback, chkpt_callback], max_epochs=args.epochs,
                         deterministic=True, log_every_n_steps=1,  accumulate_grad_batches=args.accum, strategy=strategy,
                         default_root_dir=logdir)
-    trainer.fit(model, train, dev, ckpt_path=args.checkpoint_path)
-    best = torch.load(f'{logdir}/best.ckpt')
-    model.load_state_dict(best['state_dict'])
+    #trainer.fit(model, train, dev, ckpt_path=args.checkpoint_path)
+    #best = torch.load(f'{logdir}/best.ckpt')
+    #model.load_state_dict(best['state_dict'])
     test_metrics = trainer.test(model, test)
-    pred_df = pd.DataFrame.from_records(model.test_preds, columns=['logits', 'labels', 'df_index'])
+
+    # Save predictions into a DataFrame
+    pred_df = pd.DataFrame.from_records(model.test_preds, columns=['logits', 'labels', 'sequence_indices', 'df_index'])
     pred_df.to_json(f"{logdir}/test_preds_fold_{fold}.json")
     print(test_metrics)
 
