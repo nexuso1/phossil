@@ -122,9 +122,9 @@ class LightningWrapper(L.LightningModule):
         mask = batch['labels'] != -1
         # Save test predictions
         for i in range(mask.shape[0]):
-            self.test_preds.append((logits[i][mask[i]].squeeze().cpu().numpy(), # prediction logits
-                                    batch['labels'][i][mask[i]].cpu().numpy(), # labels
-                                    (torch.nonzero(mask[i] ) - 1).squeeze().cpu().numpy(), # sequence indices (0-based) of relevant positions
+            self.test_preds.append((logits[i][mask[i]].cpu().numpy().reshape(-1), # prediction logits
+                                    batch['labels'][i][mask[i]].cpu().numpy().reshape(-1), # labels
+                                    (torch.nonzero(mask[i] ) - 1).cpu().numpy().reshape(-1), # sequence indices (0-based) of relevant positions
                                     int(batch['indices'][i].cpu().numpy()))) # index into the test set
         
         # Log and compute metrics
