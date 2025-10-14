@@ -7,8 +7,11 @@ def create_model(args):
     base, tokenizer = get_esm(args.type)
     config = RNNTokenClassiferConfig(1, create_loss(args))
     config.sr_dim = args.sr_dim
-    model = RNNTokenClassifier(config, base)
-    return model, tokenizer
+    classifier = RNNTokenClassifier(config, base)
+    if not args.lora:
+        classifier.set_base_requires_grad(False)
+        
+    return classifier, tokenizer
 
 
 def add_arguments(parser):
