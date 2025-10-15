@@ -416,7 +416,7 @@ def run_release_training(args, create_model_fn):
             model = LightningWrapper(args, model, step_metrics=step_metrics, epoch_metrics=epoch_metrics, ds_size=len(train), logdir=logdir)
 
     model.to(device)
-    train_release_model(args, model, train)
+    train_release_model(args, logdir, model, train)
 
 def train_release_model(args, logdir, model, train, dev=None):
     logger = TensorBoardLogger(logdir, name=f'tb_log')
