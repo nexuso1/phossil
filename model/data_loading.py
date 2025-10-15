@@ -5,7 +5,7 @@ import torch
 import numpy as np
 import json
 
-from prot_dataset import FullProteinDataset
+from prot_dataset import FullProteinDataset, ProteinDataset
 from sklearn.model_selection import train_test_split
 from Bio import SeqIO
 from torch.utils.data import DataLoader
@@ -133,5 +133,9 @@ def prepare_datasets(args, ignore_label):
     with open(args.dataset_path, 'r') as f:
         split_info = json.load(f)
     
-    full_dataset = FullProteinDataset(prot_info, split_info)
-    return full_dataset
+    return FullProteinDataset(prot_info, split_info)
+
+
+def prepare_full_dataset(args, ignore_label):
+    prot_info = load_prot_data(args.prot_info_path, residues=literal_eval(args.residues), ignore_index=ignore_label)
+    return ProteinDataset(prot_info)

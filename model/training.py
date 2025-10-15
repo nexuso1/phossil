@@ -22,7 +22,7 @@ from token_classifier_base import TokenClassifier
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from utils import Metadata, sigmoid_focal_loss
 from lightning.pytorch.loggers import TensorBoardLogger
-from data_loading import prepare_datasets
+from data_loading import prepare_datasets, prepare_full_dataset
 from transformers import AutoTokenizer
 from pathlib import Path
 from argparse import Namespace, ArgumentParser
@@ -265,16 +265,7 @@ def prepare_model(args, create_model_fn):
 
     return model, tokenizer
 
-def run_training(args : Namespace, create_model_fn):
-    L.seed_everything(args.seed)
-
-    log_dirname = args.o if args.o else "{}_{}".format(
-            os.path.basename(globals().get("__file__", "notebook")),
-            datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S"),
-        )
-
-    args.logdir = os.path.join("new_logs", log_dirname)
-
+def handle_metadata(args):
     if not args.checkpoint_path:
         # Create metadata
         meta = Metadata()
@@ -292,27 +283,62 @@ def run_training(args : Namespace, create_model_fn):
             for k, v in meta.data['args'].items():
                 args.__setattr__(k, v)
         args.checkpoint_path = chkpt_path
-    
-    tokenizer = get_tokenizer(args)
-    
-    full_dataset = prepare_datasets(args, ignore_label=args.ignore_label)
 
+    return meta
+
+def create_metrics(ignore_index):
     step_metrics = MetricCollection({
-        'f1' : F1Score(task='binary', ignore_index=args.ignore_label),
-        'precision' : Precision(task='binary',ignore_index=args.ignore_label),
-        'recall' : Recall(task='binary', ignore_index=args.ignore_label),
+        'f1' : F1Score(task='binary', ignore_index=ignore_index),
+        'precision' : Precision(task='binary',ignore_index=ignore_index),
+        'recall' : Recall(task='binary', ignore_index=ignore_index),
     })
 
     epoch_metrics = MetricCollection({
-        'f1' : F1Score(task='binary', ignore_index=args.ignore_label),
-        'precision' : Precision(task='binary',ignore_index=args.ignore_label),
-        'recall' : Recall(task='binary', ignore_index=args.ignore_label),
-        'auroc' : AUROC('binary', ignore_index=args.ignore_label),
-        'auprc' : AveragePrecision('binary', ignore_index=args.ignore_label),
-        'mcc' : MatthewsCorrCoef('binary', ignore_index=args.ignore_label)
+        'f1' : F1Score(task='binary', ignore_index=ignore_index),
+        'precision' : Precision(task='binary',ignore_index=ignore_index),
+        'recall' : Recall(task='binary', ignore_index=ignore_index),
+        'auroc' : AUROC('binary', ignore_index=ignore_index),
+        'auprc' : AveragePrecision('binary', ignore_index=ignore_index),
+        'mcc' : MatthewsCorrCoef('binary', ignore_index=ignore_index)
     })
+    
+    return step_metrics, epoch_metrics
+
+def compute_averages(meta : Metadata, verbose=True):
+    if verbose:
+        print('Overall test metric averages')
+
+    buffer = {k : 0 for k in meta.data['test_metrics'][-1].keys()}
+    for fold in range(len(meta.data['test_metrics'])):
+        fold_metrics = meta.data['test_metrics'][fold]
+        for k, v in fold_metrics.items():
+            buffer[k] += v
+
+    for k, v in buffer.items():
+        buffer[k] = v / len(meta.data['test_metrics'])
+        if verbose:
+            print(f'mean {k} : {buffer[k]}')
+
+    meta.data['test_metric_avg'] = buffer
+
+
+def run_training(args : Namespace, create_model_fn):
+    L.seed_everything(args.seed)
+
+    log_dirname = args.o if args.o else "{}_{}".format(
+            os.path.basename(globals().get("__file__", "notebook")),
+            datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S"),
+        )
+
+    args.logdir = os.path.join("new_logs", log_dirname)
+
+    meta = handle_metadata(args)
+    tokenizer = get_tokenizer(args)
+    full_dataset = prepare_datasets(args, ignore_label=args.ignore_label)
+    step_metrics, epoch_metrics = create_metrics(args.ignore_label)
 
     master_logdir = args.logdir
+
     for fold in range(meta.data['current_fold'], full_dataset.n_splits):
         meta.data['current_fold'] = fold
         meta.save(master_logdir)
@@ -352,25 +378,41 @@ def run_training(args : Namespace, create_model_fn):
 
         print(f'Test metrics for fold {fold}')
         print(meta.data['test_metrics'][fold])
-        # Handled by checkpoints
-        #save_model(args, model, args.n)
 
         if args.checkpoint_path:
             # Clear the checkpoint after resuming
             args.checkpoint_path = None
         meta.save(master_logdir)
 
-    print('Overall test metric averages')
-    buffer = {k : 0 for k in meta.data['test_metrics'][-1].keys()}
-    for fold in range(len(meta.data['test_metrics'])):
-        fold_metrics = meta.data['test_metrics'][fold]
-        for k, v in fold_metrics.items():
-            buffer[k] += v
-
-    for k, v in buffer.items():
-        buffer[k] = v / len(meta.data['test_metrics'])
-        print(f'mean {k} : {buffer[k]}')
-
-    meta.data['test_metric_avg'] = buffer
+    compute_averages(meta)
     meta.save(master_logdir)
     return model
+
+
+def run_release_training(args, create_model_fn):
+    L.seed_everything(args.seed)
+
+    log_dirname = args.o if args.o else "{}_{}".format(
+            os.path.basename(globals().get("__file__", "notebook")),
+            datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S"),
+        )
+
+    args.logdir = os.path.join("new_logs", log_dirname)
+
+    meta = handle_metadata(args)
+    tokenizer = get_tokenizer(args)
+    full_dataset = prepare_full_dataset(args, ignore_label=args.ignore_label)
+    step_metrics, epoch_metrics = create_metrics(args.ignore_label)
+
+    master_logdir = args.logdir
+    logdir = os.path.join(master_logdir, f'_release')
+    model, tokenizer = prepare_model(args, create_model_fn)
+    train = DataLoader(full_dataset, args.batch_size, shuffle=True,
+                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label),
+                            persistent_workers=True if args.num_workers > 0 else False, 
+                            num_workers=args.num_workers )
+    
+    if not isinstance(model, LightningWrapper):
+            model = LightningWrapper(args, model, step_metrics=step_metrics, epoch_metrics=epoch_metrics, ds_size=len(train), logdir=logdir)
+
+    model.to(device)
