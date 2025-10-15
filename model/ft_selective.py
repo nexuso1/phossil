@@ -16,8 +16,11 @@ def create_model(args):
 
 def main(args):
     run_training(args, create_model)
-
-if __name__ == '__main__':
+    
+def add_arguments(parser):
     parser.add_argument('--indices', default="[-1]", help='Indices of base model layers to be unfrozen')
+    
+if __name__ == '__main__':
+    add_arguments(parser)
     args = parser.parse_args()
     main(args)
