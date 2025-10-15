@@ -416,3 +416,37 @@ def run_release_training(args, create_model_fn):
             model = LightningWrapper(args, model, step_metrics=step_metrics, epoch_metrics=epoch_metrics, ds_size=len(train), logdir=logdir)
 
     model.to(device)
+    train_release_model(args, model, train)
+
+def train_release_model(args, logdir, model, train, dev=None):
+    logger = TensorBoardLogger(logdir, name=f'tb_log')
+    # Training checkpoint (because having a defined ModelCheckpoint overrides the default checkpointing)
+    chkpt_callback = ModelCheckpoint(logdir, filename='chkpt')
+    callbacks = [chkpt_callback]
+    if dev is not None:
+        # Best model checkpoint
+        best_callback = ModelCheckpoint(logdir, filename='best', monitor='val_f1', mode='max',
+                                        save_on_train_epoch_end=1, auto_insert_metric_name=True)
+
+        es_callback = EarlyStopping('val_f1', patience=args.patience, mode="max")
+        callbacks.extend([es_callback, best_callback])
+
+    # Use deepspeed 
+    if torch.cuda.device_count() > 1:
+        strategy = "deepspeed_stage_2"
+    else:
+        strategy = "auto"
+    trainer = L.Trainer(logger=logger, callbacks=callbacks, max_epochs=args.epochs,
+                        deterministic=True, log_every_n_steps=1,  accumulate_grad_batches=args.accum, strategy=strategy,
+                        default_root_dir=logdir)
+    trainer.fit(model, train, dev, ckpt_path=args.checkpoint_path)
+    best = torch.load(f'{logdir}/best.ckpt')
+    model.load_state_dict(best['state_dict'])
+    final_metrics = trainer.test(model, train)
+
+    # Save predictions into a DataFrame
+    pred_df = pd.DataFrame.from_records(model.test_preds, columns=['logits', 'labels', 'sequence_indices', 'df_index'])
+    pred_df.to_json(f"{logdir}/final_preds.json")
+    print(final_metrics)
+
+    return model, final_metrics
