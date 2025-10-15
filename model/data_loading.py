@@ -138,4 +138,8 @@ def prepare_datasets(args, ignore_label):
 
 def prepare_full_dataset(args, ignore_label):
     prot_info = load_prot_data(args.prot_info_path, residues=literal_eval(args.residues), ignore_index=ignore_label)
-    return ProteinDataset(prot_info)
+    with open(args.dataset_path, 'r') as f:
+        split_info = json.load(f)
+
+    subset_ds = prot_info.loc[split_info[0]['train'] + split_info[0]['test']]
+    return ProteinDataset(subset_ds)
