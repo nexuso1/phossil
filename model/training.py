@@ -57,6 +57,7 @@ parser.add_argument('--ignore_label', help='Label that will be ignored by the lo
 parser.add_argument('--patience', help='Patience during training', default=20, type=int)
 parser.add_argument('--debug', help='Debug mode', default=False, action='store_true')
 parser.add_argument('--step_lr', help='Use StepLR scheduler', default=False, action='store_true')
+parser.add_argument('--release', help='Train in the release mode (using ALL data available, no test set)', default=False, action='store_true')
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -323,6 +324,10 @@ def compute_averages(meta : Metadata, verbose=True):
 
 
 def run_training(args : Namespace, create_model_fn):
+    if args.release:
+        run_release_training(args, create_model_fn)
+        return
+    
     L.seed_everything(args.seed)
 
     log_dirname = args.o if args.o else "{}_{}".format(

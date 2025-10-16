@@ -141,5 +141,6 @@ def prepare_full_dataset(args, ignore_label):
     with open(args.dataset_path, 'r') as f:
         split_info = json.load(f)
 
+    # gets the full dataset
     subset_ds = prot_info.loc[split_info[0]['train'] + split_info[0]['test']]
     return ProteinDataset(subset_ds)
