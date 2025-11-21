@@ -5,11 +5,14 @@ import argparse
 import pandas as pd
 import sys
 import plotly.express as pt
+import ast
+import re
 import numpy as np
 
-sys.path.append('./model') 
+sys.path.append('../model') 
 
 device = 'cpu' if not torch.cuda.is_available() else 'cuda:0'
+from model.ft_selective import create_model
 
 def load_model(filepath):
     """Loads a model from the given filepath."""
@@ -17,26 +20,59 @@ def load_model(filepath):
         checkpoint = torch.load(filepath, map_location=device)
 
     except Exception as e:
-        st.error(f"Error loading model from {filepath}: {e}")
+        print(e)
+        # st.error(f"Error loading model from {filepath}: {e}")
         return None, None
     
     args = argparse.Namespace()
     for k, v in checkpoint['hyper_parameters'].items():
         args.__setattr__(k, v)
+        
+    with torch.no_grad():
+        model, tokenizer = create_model(args)
 
-    try:
-        model, tokenizer = create_kinase_model(args)
-        print('kinase model loaded')
-    except AttributeError:
-        model, tokenizer = create_encoder_model(args)
-        print('encoder model loaded')
+        # Fix potential dictionary issues with checkpoint keys
+        prefix = 'classifier.'  
+        for k in list(checkpoint['state_dict'].keys()):
+            checkpoint['state_dict'][k.removeprefix(prefix)] = checkpoint['state_dict'].pop(k)
+        model.load_state_dict(checkpoint['state_dict'])
+        res_set = set(ast.literal_eval(args.residues))
+        return model, tokenizer
 
-    # Fix potential dictionary issues with checkpoint keys
-    prefix = 'classifier.'
-    for k in list(checkpoint['state_dict'].keys()):
-        checkpoint['state_dict'][k.removeprefix(prefix)] = checkpoint['state_dict'].pop(k)
-    model.load_state_dict(checkpoint['state_dict'])
-    return model, tokenizer
+def load_models(path_info : dict):
+    models = []
+    for residues, model_path in path_info:
+        model, tokenizer = load_model(model_path)
+        models.append((residues, model))
+    
+    return models, tokenizer
+        
+def run_predictions(sequence, models, tokenizer):
+    sequence = re.sub(r'[ \n]', '', sequence)
+    out = {}
+    pred_counts = {}
+    for residues, model in models:
+        print(f'Running predictions with the {residues} model...')
+        model.eval()
+        with torch.no_grad():
+            inputs = tokenizer(sequence, return_tensors='pt')
+            preds = model.predict(**inputs).squeeze()[1:-1]
+            probs = torch.sigmoid(preds).cpu().numpy()
+            res_mask = [s in residues for s in sequence]
+            indices = np.nonzero(res_mask)[0]
+            for i in indices:
+                if i not in out:
+                    out[i] = 0
+                    pred_counts[i] = 0
+                out[i] += probs[i]
+                pred_counts[i] += 1
+    
+    # Average overlapping probabilities
+    for idx in out.keys():
+        out[idx] = float(out[idx] / pred_counts[idx])
+    
+    print('Finished.')
+    return out
 
 
 import streamlit as st
@@ -153,6 +189,7 @@ st.title("Token Classification Model Interface")
 
 from encoder import create_model as create_encoder_model
 from kinase import create_model as create_kinase_model
+from ft_selective import create_model as create_ft_model
 
 # Directory containing your model files
 model_directory = "./gui/models"
