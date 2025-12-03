@@ -58,6 +58,10 @@ parser.add_argument('--patience', help='Patience during training', default=20, t
 parser.add_argument('--debug', help='Debug mode', default=False, action='store_true')
 parser.add_argument('--step_lr', help='Use StepLR scheduler', default=False, action='store_true')
 parser.add_argument('--release', help='Train in the release mode (using ALL data available, no test set)', default=False, action='store_true')
+parser.add_argument('--perturb', help='''
+                    Applies perturbations to input sequences during training.
+                    0 applies no perturbations, 1 randomly changes residues, 2 masks sequeneces and randomly changes residues.
+                    ''', default=0, choices=[0, 1, 2])
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -351,7 +355,7 @@ def run_training(args : Namespace, create_model_fn):
         train_ds, dev_ds, test_ds = full_dataset.get_fold(fold)
         
         train = DataLoader(train_ds, args.batch_size, shuffle=True,
-                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label),
+                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label, perturb=args.perturb),
                             persistent_workers=True if args.num_workers > 0 else False, 
                             num_workers=args.num_workers )
         dev = DataLoader(dev_ds, args.batch_size, shuffle=False,

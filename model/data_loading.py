@@ -8,9 +8,10 @@ import json
 from prot_dataset import FullProteinDataset, ProteinDataset
 from sklearn.model_selection import train_test_split
 from Bio import SeqIO
-from torch.utils.data import DataLoader
 from functools import partial
 from ast import literal_eval
+
+id_to_res = ['G', 'A', 'V', 'L', 'I', 'T', 'S', 'M', 'C', 'P', 'F', 'Y', 'W', 'H', 'K', 'R', 'D', 'E', 'N', 'Q']
 
 def remove_long_sequences(df, max_length):
     mask = df['sequence'].apply(lambda x: len(x) < max_length)
@@ -38,7 +39,26 @@ def load_prot_data(dataset_path, residues={'S', 'T', 'Y'}, ignore_index=-1):
     
     return df[['id', 'sequence', 'label']]
 
-def prep_batch(data, tokenizer, ignore_label=-1):
+def perturb_seq(seq : str, mode=1, mask_token = '<mask>', mask_prob=0.15):
+    # generate mask probabilites
+    split_seq = seq.split()
+    probs = np.random.rand(len(seq)) < mask_prob
+    # Mask or perturb residue
+    for i, p in enumerate(probs):
+        if p < mask_prob:
+            if mode == 1:
+                split_seq[i] = np.random.randint(0, len(id_to_res))
+            else:
+                t = np.random.rand()
+                if t < 0.3:
+                    split_seq[i] = np.random.randint(0, len(id_to_res))
+                    
+                else:
+                    split_seq[i] = mask_token
+
+    return ''.join(split_seq)
+    
+def prep_batch(data, tokenizer, perturb_mode=0, ignore_label=-1):
     """
     Collate function for a dataloader. "data" is a list of inputs.
 
@@ -46,6 +66,9 @@ def prep_batch(data, tokenizer, ignore_label=-1):
     """
     # Indices are for the protein dataframe
     indices, sequences, labels = zip(*data)
+    if perturb_mode > 0:
+        sequences = [perturb_seq(seq, perturb_mode) for seq in sequences]
+        
     batch = tokenizer(sequences, padding='longest', return_tensors="pt")
     sequence_length = batch["input_ids"].shape[1]
     # Pad the labels correctly
