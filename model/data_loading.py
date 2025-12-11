@@ -57,6 +57,49 @@ def perturb_seq(seq : str, mode=1, mask_token = '<mask>', mask_prob=0.15):
                     split_seq[i] = mask_token
 
     return ''.join(split_seq)
+
+def mask_batch_for_mlm(
+    input_ids: torch.Tensor,
+    mask_token_id: int,
+    bos_token_id: int,
+    eos_token_id: int,
+    pad_token_id : int,
+    masking_probability: float = 0.15,
+) -> torch.Tensor:
+    """
+    Randomly replaces certain tokens in a batch of input IDs with a mask token.
+
+    Excludes padding, BOS, and EOS tokens from the masking process.
+
+    Args:
+        input_ids (torch.Tensor): The batch of token IDs (B x L).
+        lengths (torch.Tensor): The actual length of each sequence (B).
+        mask_token_id (int): The ID of the mask token.
+        bos_token_id (int): The ID of the Beginning-of-Sentence token.
+        eos_token_id (int): The ID of the End-of-Sentence token.
+        masking_probability (float): The probability of masking a token.
+
+    Returns:
+        torch.Tensor: The input_ids tensor with selected tokens replaced by mask_token_id.
+    """
+    # Create a deep copy of the input_ids to modify
+    masked_input_ids = input_ids.clone()
+
+    maskable_mask = input_ids != bos_token_id & input_ids != eos_token_id & input_ids != pad_token_id
+
+    # Create a tensor of random numbers between 0 and 1
+    probability_matrix = torch.full(input_ids.shape, masking_probability, dtype=torch.float)
+    
+    # Only consider tokens that are actually maskable
+    probability_matrix[~maskable_mask] = 0.0
+
+    # Draw a mask based on the probability matrix
+    masked_indices = torch.bernoulli(probability_matrix).bool()
+
+    # Apply the mask
+    masked_input_ids[masked_indices] = mask_token_id
+
+    return masked_input_ids
     
 def prep_batch(data, tokenizer, perturb_mode=0, ignore_label=-1):
     """
@@ -68,7 +111,6 @@ def prep_batch(data, tokenizer, perturb_mode=0, ignore_label=-1):
     indices, sequences, labels = zip(*data)
     if perturb_mode > 0:
         sequences = [perturb_seq(seq, perturb_mode) for seq in sequences]
-        
     batch = tokenizer(sequences, padding='longest', return_tensors="pt")
     sequence_length = batch["input_ids"].shape[1]
     # Pad the labels correctly

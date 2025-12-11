@@ -17,6 +17,7 @@ class BaseModel(torch.nn.Module):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.config = config
         self.logger = config.logger
+        self.ignore_index = config.ignore_index
         self.loss = config.loss
 
     def save(self, path):

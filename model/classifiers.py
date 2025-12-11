@@ -2,6 +2,7 @@
 
 from torch.nn.modules import Module
 from token_classifier_base import TokenClassifier, TokenClassifierConfig
+from lm_model_base import LMModelConfig, LMModel, LMModelInputs, LMModelOuptut
 from modules import RNNClassifier
 from dataclasses import dataclass, field
 from modules import Conv1dModel, ConvLayerConfig, SinPositionalEncoding, ResidualMLP, FusedMBConv1dModel, FusedMBConvConfig
@@ -57,6 +58,11 @@ class KinaseClassifierConfig(EncoderClassifierConfig):
 @dataclass
 class SelectiveFinetuningClassifierConfig(TokenClassifierConfig):
     unfreeze_indices : list[int] = field(default_factory= lambda : [-1])
+
+@dataclass
+class LMFinetuningClassifierConfig(LMModelConfig):
+    unfreeze_indices : list[int] = field(default_factory= lambda : [-1])
+
 
 class LinearClassifier(TokenClassifier):
     def __init__(self, config: TokenClassifierConfig, base_model: Module) -> None:
@@ -336,6 +342,27 @@ class SelectiveFinetuningClassifier(TokenClassifier):
             # index 0 contains the name, 1 the parameter
             for param in param_list[i][1].parameters():
                 param.requires_grad = req_grad_value
+
+class LMFinetuningClassifier(LMModel):
+    def __init__(self, config: SelectiveFinetuningClassifierConfig, base_model: Module) -> None:
+        super().__init__(config, base_model)
+        self.classifier = torch.nn.Linear(base_model.config.hidden_size, 1)
+        self.init_weights(self.classifier)
+        self.set_base_requires_grad(False)
+        self.set_indexed_layers_grad(config.unfreeze_indices, True)
+        
+    def set_indexed_layers_grad(self, indices : list[int], req_grad_value : bool):
+        indices = set(indices)
+        self.modified_indices = indices
+        param_list = list(self.base.encoder.layer.named_children())
+        for i in indices:
+            # index 0 contains the name, 1 the parameter
+            for param in param_list[i][1].parameters():
+                param.requires_grad = req_grad_value
+
+    def forward(self, inputs : LMModelInputs):
+        base_output = self.base(attention_mask=inputs.attention_mask, input_ids=inputs.input_ids, output_hidden_states=True)
+        return LMModelOuptut(logits=self.classifier(base_output.hidden_states[-1]), base_output=base_output)
 
 class DummyClassifier(TokenClassifier):
     def __init__(self, config: RNNTokenClassiferConfig, base_model) -> None:

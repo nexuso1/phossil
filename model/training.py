@@ -61,7 +61,7 @@ parser.add_argument('--release', help='Train in the release mode (using ALL data
 parser.add_argument('--perturb', help='''
                     Applies perturbations to input sequences during training.
                     0 applies no perturbations, 1 randomly changes residues, 2 masks sequeneces and randomly changes residues.
-                    ''', default=0, choices=[0, 1, 2])
+                    ''', default=0, type=int, choices=[0, 1, 2])
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -417,7 +417,7 @@ def run_release_training(args, create_model_fn):
     logdir = os.path.join(master_logdir, f'_release')
     model, tokenizer = prepare_model(args, create_model_fn)
     train = DataLoader(full_dataset, args.batch_size, shuffle=True,
-                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label),
+                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label, perturb_mode=args.perturb),
                             persistent_workers=True if args.num_workers > 0 else False, 
                             num_workers=args.num_workers )
     
