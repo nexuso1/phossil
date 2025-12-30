@@ -8,8 +8,10 @@ import json
 from prot_dataset import FullProteinDataset, ProteinDataset
 from sklearn.model_selection import train_test_split
 from Bio import SeqIO
+from Bio.Align import substitution_matrices
 from functools import partial
 from ast import literal_eval
+from constants import sub_matrix, sub_probs
 
 id_to_res = ['G', 'A', 'V', 'L', 'I', 'T', 'S', 'M', 'C', 'P', 'F', 'Y', 'W', 'H', 'K', 'R', 'D', 'E', 'N', 'Q']
 
@@ -64,7 +66,10 @@ def mask_batch_for_mlm(
     bos_token_id: int,
     eos_token_id: int,
     pad_token_id : int,
-    masking_probability: float = 0.15,
+    modify_prob: float = 0.15,
+    masking_prob : float = 0.7,
+    random_residue_prob = 0.15,
+    blosum_residue_prob = 0.15
 ) -> torch.Tensor:
     """
     Randomly replaces certain tokens in a batch of input IDs with a mask token.
@@ -84,22 +89,26 @@ def mask_batch_for_mlm(
     """
     # Create a deep copy of the input_ids to modify
     masked_input_ids = input_ids.clone()
+    mask_thresh = masking_prob
+    random_thresh = mask_thresh + random_residue_prob
 
-    maskable_mask = input_ids != bos_token_id & input_ids != eos_token_id & input_ids != pad_token_id
-
+    modifiable = input_ids != bos_token_id & input_ids != eos_token_id & input_ids != pad_token_id
+    
     # Create a tensor of random numbers between 0 and 1
-    probability_matrix = torch.full(input_ids.shape, masking_probability, dtype=torch.float)
+    probability_matrix = torch.full(input_ids.shape, modify_prob, dtype=torch.float)
     
     # Only consider tokens that are actually maskable
-    probability_matrix[~maskable_mask] = 0.0
+    probability_matrix[~modifiable] = 0.0
 
     # Draw a mask based on the probability matrix
-    masked_indices = torch.bernoulli(probability_matrix).bool()
+    to_modify = torch.bernoulli(probability_matrix).bool()
 
-    # Apply the mask
-    masked_input_ids[masked_indices] = mask_token_id
+    modifications = torch.multinomial([masking_prob, random_residue_prob, blosum_residue_prob], torch.sum(to_modify), replacement=True)
 
     return masked_input_ids
+
+def perturb_residues(orig_ids, masked_ids, mask_token_id, random_prob=0.3, blos_prob=0):
+    rand_vals = torch.multinomial([1 - (random_prob + blos_prob), random_prob, blos_prob], )
     
 def prep_batch(data, tokenizer, perturb_mode=0, ignore_label=-1):
     """
