@@ -11,9 +11,13 @@ from Bio import SeqIO
 from Bio.Align import substitution_matrices
 from functools import partial
 from ast import literal_eval
+<<<<<<< HEAD
 from constants import sub_matrix, sub_probs
 
 id_to_res = ['G', 'A', 'V', 'L', 'I', 'T', 'S', 'M', 'C', 'P', 'F', 'Y', 'W', 'H', 'K', 'R', 'D', 'E', 'N', 'Q']
+=======
+from constants import id_to_res, esm_valid_res_ids, blosum, esm_to_blosum_id,
+>>>>>>> refs/remotes/origin/master
 
 def remove_long_sequences(df, max_length):
     mask = df['sequence'].apply(lambda x: len(x) < max_length)
@@ -60,6 +64,13 @@ def perturb_seq(seq : str, mode=1, mask_token = '<mask>', mask_prob=0.15):
 
     return ''.join(split_seq)
 
+def generate_random_residues(num_samples, residue_id_mapping):
+    choices = torch.randint(0, len(residue_id_mapping), num_samples)
+    return torch.as_tensor(residue_id_mapping)[choices]
+
+def generate_blosum_residues(orig_res_ids, residue_id_mapping):
+    blosum_indices = ...
+    
 def mask_batch_for_mlm(
     input_ids: torch.Tensor,
     mask_token_id: int,
@@ -67,9 +78,15 @@ def mask_batch_for_mlm(
     eos_token_id: int,
     pad_token_id : int,
     modify_prob: float = 0.15,
+<<<<<<< HEAD
     masking_prob : float = 0.7,
     random_residue_prob = 0.15,
     blosum_residue_prob = 0.15
+=======
+    mask_prob : float = 0.7,
+    random_prob : float = 0.15,
+    blosum_prob : float = 0.15
+>>>>>>> refs/remotes/origin/master
 ) -> torch.Tensor:
     """
     Randomly replaces certain tokens in a batch of input IDs with a mask token.
@@ -95,6 +112,7 @@ def mask_batch_for_mlm(
     modifiable = input_ids != bos_token_id & input_ids != eos_token_id & input_ids != pad_token_id
     
     # Create a tensor of random numbers between 0 and 1
+<<<<<<< HEAD
     probability_matrix = torch.full(input_ids.shape, modify_prob, dtype=torch.float)
     
     # Only consider tokens that are actually maskable
@@ -104,6 +122,27 @@ def mask_batch_for_mlm(
     to_modify = torch.bernoulli(probability_matrix).bool()
 
     modifications = torch.multinomial([masking_prob, random_residue_prob, blosum_residue_prob], torch.sum(to_modify), replacement=True)
+=======
+    probability_matrix = torch.rand_like(input_ids.shape, modify_prob, dtype=torch.float)
+    
+    # Only consider tokens that are actually maskable
+    probability_matrix[~maskable_mask] = 1.0
+
+    modified = probability_matrix < modify_prob
+
+    choices = torch.multinomial(torch.Tensor([mask_prob, random_prob, blosum_prob]), torch.sum(modified), replacement=True)
+
+    # Modify tokens according to generated choices
+
+    # Mask tokens
+    masked_input_ids[modified][choices == 0] = mask_token_id
+
+    # Randomly perturb tokens
+    masked_input_ids[modified][choices == 1] = generate_random_residues(torch.sum(choices == 1), )
+    # Perturb tokens according to BLOSUM62
+
+    # Apply the mask
+>>>>>>> refs/remotes/origin/master
 
     return masked_input_ids
 
