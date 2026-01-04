@@ -17,7 +17,7 @@ def remove_long_sequences(df, max_length):
     return df[mask]
 
 def labeling_fn(row, residues={'S', 'T', 'Y'}, ignore_index=-1):
-    res = np.zeros(len(row['sequence']), dtype=np.uint8) + ignore_index
+    res = np.zeros(len(row['sequence']), dtype=np.int32) + ignore_index
     mask = [s in residues for s in row['sequence']] # Only relevant prots are not ignored
     res[mask] = 0
     valid_sites = [i for i in row['sites'] if row['sequence'][i] in residues]
@@ -160,6 +160,11 @@ def prep_batch(data, tokenizer, modify_prob=0, mask_prob=0.7, rand_prob=0.15, su
     indices, sequences, labels = zip(*data)
     batch = tokenizer(sequences, padding='longest', return_tensors="pt")
     sequence_length = batch["input_ids"].shape[1]
+
+    # Keep original ids as targets for MLM
+    if modify_prob > 0 and mask_prob > 0:
+        batch['orig_ids'] = batch['input_ids']
+
     batch['input_ids'] = perturb_batch(batch['input_ids'], modify_prob=modify_prob, random_prob=rand_prob,
                                         sub_prob=sub_prob, mask_prob=mask_prob)
     # Pad the labels correctly

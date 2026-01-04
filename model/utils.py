@@ -7,12 +7,21 @@ import os
 import json
 import torch
 
-from torch._C import _log_api_usage_once
 from torch.nn.functional import binary_cross_entropy_with_logits
 from itertools import chain
 from Bio import SeqIO
-from datasets import Dataset
+from transformers import EsmModel, AutoTokenizer
 
+def get_esm(type):
+    if type == '3B':
+        model, tokenizer = EsmModel.from_pretrained('facebook/esm2_t36_3B_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t36_3B_UR50D')
+    elif type == '15B':
+        model, tokenizer = EsmModel.from_pretrained('facebook/esm2_t48_15B_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t48_15B_UR50D')
+    elif type == '35M':
+        model, tokenizer = EsmModel.from_pretrained('facebook/esm2_t12_35M_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t12_35M_UR50D')
+    else:
+        model, tokenizer = EsmModel.from_pretrained('facebook/esm2_t33_650M_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t33_650M_UR50D')
+    return model, tokenizer
 
 
 def load_torch_model(path):
@@ -43,98 +52,6 @@ def save_as_string(obj, path):
 
     with open(path, 'w') as f:
         json.dump(obj, f)
-
-class ProteinDataset(Dataset):
-    def __init__(self,tokenizer, max_length,  
-                 inputs : list = None,
-                 targets : list = None,
-                 verbose = 1
-                 ) -> None:
-        
-
-        self.x = inputs
-        self.y = targets
-
-        self.verbose = verbose
-        self.tokenizer = tokenizer
-        self.max_len = max_length
-
-        self.prune_long_sequences()
-        self.prep_data()
-
-    def load_data(self, dataset_path):
-        df = pd.read_json(dataset_path)
-        df = df.dropna()
-        df['sites'] = df['sites'].apply(lambda x: [eval(i) - 1 for i in x])
-        labels = [np.zeros(shape=len(s)) for s in df['sequence']]
-        for i, l in enumerate(labels):
-            l[df.iloc[i]['sites']] = 1
-
-        df['label'] = labels
-    
-        return df[['id', 'sequence', 'label']]
-
-    def prune_long_sequences(self) -> None:
-        """
-        Remove all sequences that are longer than self.max_len from the dataset.
-        Updates the self.x and self.y attributes.
-        """
-        mask = self.x.apply(lambda x: len(x) < self.max_len)
-        new_x = self.x[mask]
-        new_y = self.y[mask]
-
-        if self.verbose > 0:
-            count = self.x.shape[0] - new_x.shape[0]
-            print(f"Removed {count} sequences from the dataset longer than {self.max_len}.")
-
-        self.x = new_x
-        self.y = new_y
-
-    def prep_seq(self, seq):
-        """
-        Prepares the given sequence for the model by subbing rare AAs for X and adding 
-        padding between AAs. Required by the base model.
-        """
-        # print(seq)
-        cleaned = " ".join(list(re.sub(r"[UZOB]", "X", seq)))
-        return cleaned
-    
-    def prep_data(self):
-        prepped = np.array(self.x.apply(self.prep_seq), dtype=np.int32)
-        tokenized = self.tokenizer(prepped)
-        targets = [self.prep_target(tokenized.iloc[i], self.y.iloc[i]) for i in range(self.y.shape[0])]
-        self.input_ids = tokenized['input_ids']
-        self.targets = targets
-
-    def prep_target(self, enc, target):
-        """
-        Transforms the target into an array of ones and zeros with the same length as the 
-        corresponding FASTA protein sequence. Value of one represents a phosphorylation 
-        site being present at the i-th AA in the protein sequence.
-        """
-        res = np.zeros(self.max_len)
-        res[target] = 1
-        res = res.roll(1)
-        for i, idx in enumerate(enc.input_ids.flatten().int()):
-            if idx == 0: # [PAD]
-                break
-
-            if idx == 2 or idx == 3: # [CLS] or [SEP]
-                res[i] = -100 # This label will be ignored by the loss
-        return res
-
-    def __getitem__(self, index):
-        encoding = self.data.iloc[index]
-        target =self.y[index]
-        return {
-            'input_ids' : encoding['input_ids'].flatten(),
-            'attention_mask' : encoding['attention_mask'].flatten(),
-            'labels' : target
-        }
-
-    def __len__(self):
-        return self.x.shape[0]
-
 
 class SimpleNamespace:
     def __init__(self, **kwargs) -> None:

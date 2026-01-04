@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from tqdm.auto import tqdm
 from utils import Metadata, load_torch_model, sigmoid_focal_loss
 from data_loading import prepare_datasets
-from datasets import Dataset
 from transformers import set_seed, EsmModel, AutoTokenizer
 from token_classifier_base import TokenClassifier, TokenClassifierConfig
 from classifiers import RNNTokenClassifier, RNNTokenClassiferConfig
@@ -92,7 +91,7 @@ def eval_model(model, test_ds, epoch, metrics : torchmetrics.MetricCollection):
             probs_list.extend(probs) # Predicted probabilites
     return {k : v.cpu().numpy() for k, v in logs.items()}, probs_list
 
-def train_model(train_ds : Dataset, dev_ds : Dataset, model : torch.nn.Module, config : TrainingConfig):
+def train_model(train_ds, dev_ds, model : torch.nn.Module, config : TrainingConfig):
 
     # Set all random seeds
     set_seeds(config.seed)
