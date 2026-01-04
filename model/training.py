@@ -58,10 +58,12 @@ parser.add_argument('--patience', help='Patience during training', default=20, t
 parser.add_argument('--debug', help='Debug mode', default=False, action='store_true')
 parser.add_argument('--step_lr', help='Use StepLR scheduler', default=False, action='store_true')
 parser.add_argument('--release', help='Train in the release mode (using ALL data available, no test set)', default=False, action='store_true')
-parser.add_argument('--perturb', help='''
-                    Applies perturbations to input sequences during training.
-                    0 applies no perturbations, 1 randomly changes residues, 2 masks sequeneces and randomly changes residues.
-                    ''', default=0, type=int, choices=[0, 1, 2])
+parser.add_argument('--modify_prob', help='Probabilty of modifying input residues during training', default=0, type=float)
+parser.add_argument('--mask_prob', help='Relative probabilty of masking input residues during training. Only relevant if "modify_prob" > 0', default=0.7, type=float)
+parser.add_argument('--rand_prob', help='Relative probability of randomly changing input residues during training. Only relevant if "modify_prob" > 0',
+                     default=0.15, type=float)
+parser.add_argument('--sub_prob', help='Relative probability of substituting input residues via a substitution matrix (BLOSUM62) during training. Only relevant if "modify_prob" > 0',
+                     default=0.15, type=float)
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -355,16 +357,20 @@ def run_training(args : Namespace, create_model_fn):
         train_ds, dev_ds, test_ds = full_dataset.get_fold(fold)
         
         train = DataLoader(train_ds, args.batch_size, shuffle=True,
-                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label, perturb=args.perturb),
+                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label,
+                                               modify_prob=args.modify_prob, mask_prob=args.mask_prob, rand_prob=args.rand_prob,
+                                               sub_prob=args.sub_prob),
                             persistent_workers=True if args.num_workers > 0 else False, 
                             num_workers=args.num_workers )
+        
+        # Do not modify input residues when not training
         dev = DataLoader(dev_ds, args.batch_size, shuffle=False,
-                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label),
+                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label, modify_prob=0),
                             persistent_workers=True if args.num_workers > 0 else False,
                             num_workers=args.num_workers)
         
         test = DataLoader(test_ds, args.batch_size, shuffle=False,
-                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label),
+                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label, modify_prob=0),
                             persistent_workers=True if args.num_workers > 0 else False,
                             num_workers=args.num_workers)
         
@@ -417,7 +423,8 @@ def run_release_training(args, create_model_fn):
     logdir = os.path.join(master_logdir, f'_release')
     model, tokenizer = prepare_model(args, create_model_fn)
     train = DataLoader(full_dataset, args.batch_size, shuffle=True,
-                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label, perturb_mode=args.perturb),
+                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label, modify_prob=args.modify_prob,
+                                                mask_prob=args.mask_prob, sub_prob=args.sub_prob, rand_prob=args.rand_prob),
                             persistent_workers=True if args.num_workers > 0 else False, 
                             num_workers=args.num_workers )
     

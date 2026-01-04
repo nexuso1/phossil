@@ -64,7 +64,7 @@ def generate_random_residues(num_samples, residue_id_mapping):
     choices = torch.randint(len(residue_id_mapping), (num_samples,))
     return torch.as_tensor(residue_id_mapping)[choices]
 
-def generate_blosum_residues(orig_res_ids : torch.Tensor, esm_to_sm_mapping):
+def generate_sm_residues(orig_res_ids : torch.Tensor, esm_to_sm_mapping):
     if orig_res_ids.numel() == 0:
         return orig_res_ids
     
@@ -79,7 +79,7 @@ def generate_blosum_residues(orig_res_ids : torch.Tensor, esm_to_sm_mapping):
  
     return torch.multinomial(buffer, 1).squeeze()
     
-def mask_batch_for_mlm(
+def perturb_batch(
     input_ids: torch.Tensor,
     mask_token_id: int = 32,
     bos_token_id: int = 0,
@@ -88,23 +88,39 @@ def mask_batch_for_mlm(
     modify_prob: float = 0.15,
     mask_prob : float = 0.7,
     random_prob : float = 0.15,
-    blosum_prob : float = 0.15
+    sub_prob : float = 0.15
 ) -> torch.Tensor:
     """
-    Randomly replaces certain tokens in a batch of input IDs with a mask token.
+    Perturbs a batch of input token IDs for Masked Language Modeling (MLM).
 
-    Excludes padding, BOS, and EOS tokens from the masking process.
+    This function creates a copy of the input batch and modifies a percentage of 
+    tokens based on the `modify_prob`. Special tokens (BOS, EOS, PAD) are excluded 
+    from modification.
+    
+    Selected tokens are perturbed using one of three strategies, determined by the 
+    weights provided in `mask_prob`, `random_prob`, and `blosum_prob`:
+    1. Replaced with a mask token.
+    2. Replaced with a random valid residue.
+    3. Replaced with a similar residue based on the BLOSUM62 substitution matrix.
 
     Args:
-        input_ids (torch.Tensor): The batch of token IDs (B x L).
-        lengths (torch.Tensor): The actual length of each sequence (B).
-        mask_token_id (int): The ID of the mask token.
-        bos_token_id (int): The ID of the Beginning-of-Sentence token.
-        eos_token_id (int): The ID of the End-of-Sentence token.
-        masking_probability (float): The probability of masking a token.
+        input_ids (torch.Tensor): The input tensor containing batches of token IDs.
+        mask_token_id (int, optional): The ID used for masking. Defaults to 32.
+        bos_token_id (int, optional): Beginning-of-sequence token ID. Defaults to 0.
+        eos_token_id (int, optional): End-of-sequence token ID. Defaults to 2.
+        pad_token_id (int, optional): Padding token ID. Defaults to 1.
+        modify_prob (float, optional): The probability (0.0 to 1.0) of selecting a 
+            token for modification. Defaults to 0.15.
+        mask_prob (float, optional): The relative probability that a selected token 
+            is replaced with `mask_token_id`. Defaults to 0.7.
+        random_prob (float, optional): The relative probability that a selected token 
+            is replaced with a random residue. Defaults to 0.15.
+        sub_prob (float, optional): The relative probability that a selected token 
+            is replaced via sub. matrix substitution. Defaults to 0.15.
 
     Returns:
-        torch.Tensor: The input_ids tensor with selected tokens replaced by mask_token_id.
+        torch.Tensor: A new tensor of the same shape and dtype as `input_ids` 
+        containing the perturbed sequences.
     """
     # Create a deep copy of the input_ids to modify
     masked_input_ids = input_ids.clone()
@@ -119,7 +135,7 @@ def mask_batch_for_mlm(
 
     modified = probability_matrix < modify_prob
 
-    choices = torch.multinomial(torch.Tensor([mask_prob, random_prob, blosum_prob]), modified.numel(), replacement=True).reshape_as(modified)
+    choices = torch.multinomial(torch.Tensor([mask_prob, random_prob, sub_prob]), modified.numel(), replacement=True).reshape_as(modified)
 
     # Modify tokens according to generated choices
 
@@ -130,11 +146,11 @@ def mask_batch_for_mlm(
     masked_input_ids[modified & (choices == 1)] = generate_random_residues(torch.sum(modified & (choices == 1)), esm_valid_res_ids).to(masked_input_ids.dtype)
 
     # Perturb tokens according to a substitution matrix (in our case BLOSUM62)
-    masked_input_ids[modified & (choices == 2)] = generate_blosum_residues(masked_input_ids[modified & (choices == 2)], esm_to_sm_id_mapping).to(masked_input_ids.dtype)
+    masked_input_ids[modified & (choices == 2)] = generate_sm_residues(masked_input_ids[modified & (choices == 2)], esm_to_sm_id_mapping).to(masked_input_ids.dtype)
 
     return masked_input_ids
 
-def prep_batch(data, tokenizer, perturb_mode=0, ignore_label=-1):
+def prep_batch(data, tokenizer, modify_prob=0, mask_prob=0.7, rand_prob=0.15, sub_prob=0.15, ignore_label=-1):
     """
     Collate function for a dataloader. "data" is a list of inputs.
 
@@ -142,10 +158,10 @@ def prep_batch(data, tokenizer, perturb_mode=0, ignore_label=-1):
     """
     # Indices are for the protein dataframe
     indices, sequences, labels = zip(*data)
-    if perturb_mode > 0:
-        sequences = [perturb_seq(seq, perturb_mode) for seq in sequences]
     batch = tokenizer(sequences, padding='longest', return_tensors="pt")
     sequence_length = batch["input_ids"].shape[1]
+    batch['input_ids'] = perturb_batch(batch['input_ids'], modify_prob=modify_prob, random_prob=rand_prob,
+                                        sub_prob=sub_prob, mask_prob=mask_prob)
     # Pad the labels correctly
     batch['labels'] = np.array([[ignore_label] + list(label) + [ignore_label] * (sequence_length - len(label) - 1) for label in labels])
     batch['labels'] = torch.as_tensor(batch['labels'], dtype=torch.float32)
