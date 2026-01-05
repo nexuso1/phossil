@@ -2,7 +2,7 @@
 
 from torch.nn.modules import Module
 from token_classifier_base import TokenClassifier, TokenClassifierConfig
-from lm_model_base import LMModelConfig, LMModel, LMModelInputs, LMModelOuptut
+from lm_model_base import LMModelConfig, LMModel, LMModelOuptut
 from modules import RNNClassifier
 from dataclasses import dataclass, field
 from modules import Conv1dModel, ConvLayerConfig, SinPositionalEncoding, ResidualMLP, FusedMBConv1dModel, FusedMBConvConfig
@@ -360,8 +360,8 @@ class LMFinetuningClassifier(LMModel):
             for param in param_list[i][1].parameters():
                 param.requires_grad = req_grad_value
 
-    def forward(self, inputs : LMModelInputs):
-        base_output = self.base(attention_mask=inputs.attention_mask, input_ids=inputs.input_ids, output_hidden_states=True)
+    def forward(self, input_ids, attention_mask, **kwargs):
+        base_output = self.base(attention_mask=attention_mask, input_ids=input_ids, output_hidden_states=True)
         return LMModelOuptut(logits=self.classifier(base_output.hidden_states[-1]), base_output=base_output)
 
 class DummyClassifier(TokenClassifier):
