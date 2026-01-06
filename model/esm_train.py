@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from tqdm.auto import tqdm
 from utils import Metadata, load_torch_model, sigmoid_focal_loss
 from data_loading import prepare_datasets
-from transformers import set_seed, EsmModel, AutoTokenizer
+from transformers import set_seed, EsmModel, AutoTokenizer, EsmForMaskedLM
 from token_classifier_base import TokenClassifier, TokenClassifierConfig
 from classifiers import RNNTokenClassifier, RNNTokenClassiferConfig
 from training import device, parser,save_model
@@ -39,15 +39,20 @@ class TrainingConfig:
     f1_min : int = 0
     optim : torch.optim.Optimizer = None
 
-def get_esm(type):
-    if type == '3B':
-        model, tokenizer = EsmModel.from_pretrained('facebook/esm2_t36_3B_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t36_3B_UR50D')
-    elif type == '15B':
-        model, tokenizer = EsmModel.from_pretrained('facebook/esm2_t48_15B_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t48_15B_UR50D')
-    elif type == '35M':
-        model, tokenizer = EsmModel.from_pretrained('facebook/esm2_t12_35M_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t12_35M_UR50D')
+def get_esm(type, masked_lm=False):
+    if masked_lm:
+        model_class = EsmForMaskedLM
     else:
-        model, tokenizer = EsmModel.from_pretrained('facebook/esm2_t33_650M_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t33_650M_UR50D')
+        model_class = EsmModel
+
+    if type == '3B':
+        model, tokenizer = model_class.from_pretrained('facebook/esm2_t36_3B_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t36_3B_UR50D')
+    elif type == '15B':
+        model, tokenizer = model_class.from_pretrained('facebook/esm2_t48_15B_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t48_15B_UR50D')
+    elif type == '35M':
+        model, tokenizer = model_class.from_pretrained('facebook/esm2_t12_35M_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t12_35M_UR50D')
+    else:
+        model, tokenizer = model_class.from_pretrained('facebook/esm2_t33_650M_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t33_650M_UR50D')
     return model, tokenizer
 
 def set_seeds(s):

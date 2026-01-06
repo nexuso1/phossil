@@ -354,7 +354,7 @@ class LMFinetuningClassifier(LMModel):
     def set_indexed_layers_grad(self, indices : list[int], req_grad_value : bool):
         indices = set(indices)
         self.modified_indices = indices
-        param_list = list(self.base.encoder.layer.named_children())
+        param_list = list(self.base.esm.encoder.layer.named_children())
         for i in indices:
             # index 0 contains the name, 1 the parameter
             for param in param_list[i][1].parameters():
@@ -362,7 +362,7 @@ class LMFinetuningClassifier(LMModel):
 
     def forward(self, input_ids, attention_mask, **kwargs):
         base_output = self.base(attention_mask=attention_mask, input_ids=input_ids, output_hidden_states=True)
-        return LMModelOuptut(logits=self.classifier(base_output.hidden_states[-1]), base_output=base_output)
+        return self.classifier(base_output.hidden_states[-1]), base_output
 
 class DummyClassifier(TokenClassifier):
     def __init__(self, config: RNNTokenClassiferConfig, base_model) -> None:
