@@ -6,30 +6,35 @@ import argparse
 import pandas as pd
 from pathlib import Path
 import os
+import glob
 
-def create_fold_fastas(sequences_json, splits_json, prefix=None):
+def create_fold_fastas(prot_info_path, splits_folder, prefix=None):
     # 1. Load the sequence data into a lookup dictionary {id: sequence_string}
-    seq_data = pd.read_json(sequences_json)
+    prot_info = pd.read_json(prot_info_path)
     #seq_lookup = {i : entry['sequence'] for i, entry in seq_data.iterrows()}
 
-    # 2. Load the split information
-    with open(splits_json, 'r') as f:
-        folds = json.load(f)
+    split_paths = glob.glob(f'{splits_folder}/splits_*.json')
+    splits = {}
+    for split in split_paths:
+        # 2. Load the split information
+        with open(splits_folder, 'r') as f:
+            folds = json.load(f)
+        splits[Path(split).stem] = folds
 
     # 3. Iterate through each fold (e.g., Fold 0, Fold 1, etc.)
     for i, fold in enumerate(folds):
-        pardir = f'{prefix}_fastas/fold{i}'
+        pardir = f'{splits_folder}/{prefix}_fastas/fold{i}'
         os.makedirs(pardir)
         for category in ['train', 'test']:
             records = []
             ids_in_split = fold.get(category, [])
 
             for df_id in ids_in_split:
-                if df_id in seq_data.index:
+                if df_id in prot_info.index:
                     # Create SeqRecord
                     record = SeqRecord(
-                        Seq(seq_data.loc[df_id]['sequence']),
-                        id=seq_data.loc[df_id]['id'],
+                        Seq(prot_info.loc[df_id]['sequence']),
+                        id=prot_info.loc[df_id]['id'],
                         description=""
                     )
                     records.append(record)
@@ -43,10 +48,9 @@ def create_fold_fastas(sequences_json, splits_json, prefix=None):
                     SeqIO.write(records, output_handle, "fasta")
                 print(f"Created {filename} with {len(records)} sequences.")
 
-# Usage
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--seqs', type=str)
-    parser.add_argument('--splits', type=str)
+    parser.add_argument('--splits', type=str, default=None)
     args = parser.parse_args()
     create_fold_fastas(args.seqs, args.splits, prefix=Path(args.splits).stem)
