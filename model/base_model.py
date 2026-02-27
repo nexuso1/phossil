@@ -60,7 +60,7 @@ class BaseModel(torch.nn.Module):
         for p in self.base.parameters():
           p.requires_grad = requires_grad
 
-    def compute_loss(self, inputs, outputs, **kwargs):
+    def compute_loss(self, labels, attention_mask, outputs, **kwargs):
         """
         Compute the loss of outputs w.r.t. model weights and inputs.
         
@@ -70,16 +70,29 @@ class BaseModel(torch.nn.Module):
         """
         raise NotImplementedError('Need to implement loss computation')
 
-    def predict(self, inputs, *args, **kwargs) -> torch.Tensor:
+    def predict(self, input_ids, attention_mask, labels=None, return_dict=False, *args, **kwargs) -> torch.Tensor:
         """
         Prediction in eval mode.
         Outputs are the final classification logits as a Tensor.
         """
         self.eval()
         with torch.no_grad():
-            return self(inputs, *args, **kwargs)
+            if labels is not None:
+                logits, outputs = self(input_ids, attention_mask, *args, **kwargs)
+                loss = self.compute_loss(labels, attention_mask, (logits, outputs), **kwargs)
+            else:
+                return self(input_ids, attention_mask, *args, **kwargs)
+            
+            if return_dict:
+                        return {
+                            'loss' : loss,
+                            'logits' : logits,
+                            'outputs' : outputs
+                        }
+            
+            return loss, logits
 
-    def train_predict(self, inputs, *args, **kwargs):
+    def train_predict(self, input_ids, attention_mask, labels, *args, **kwargs):
         """
         Prediction in train mode. Labels should be provided.
         Outputs will contain the loss w.r.t inputs.
@@ -88,8 +101,8 @@ class BaseModel(torch.nn.Module):
         states and attentions of the base model
         """
         self.train()
-        outputs = self(inputs, *args, **kwargs)
-        loss = self.compute_loss(inputs, outputs, **kwargs)
+        outputs = self(input_ids, attention_mask, *args, **kwargs)
+        loss = self.compute_loss(labels, attention_mask, outputs, **kwargs)
         return loss, outputs
     
     def forward(self, inputs, **kwargs):

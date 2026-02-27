@@ -6,7 +6,7 @@ from training import  parser, create_loss, run_training
 from classifiers import LMFinetuningClassifier, LMFinetuningClassifierConfig
 
 def create_model(args):
-    esm, tokenizer = get_esm(args.type)
+    esm, tokenizer = get_esm(args.type, masked_lm=True)
     indices = ast.literal_eval(args.indices)
     config = LMFinetuningClassifierConfig(loss=create_loss(args), unfreeze_indices=indices,
                                                  base_type=args.type)

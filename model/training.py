@@ -102,7 +102,7 @@ class LightningWrapper(L.LightningModule):
         loss, logits = self.classifier.train_predict(**batch)
         mean_loss = self.loss_metric(loss)
         self.log('train_loss', loss, logger=True, prog_bar=True, sync_dist=True)
-        self._compute_metrics_step(logits.reshape(-1, self.classifier.n_labels), batch['labels'].view(-1, self.classifier.n_labels),
+        self._compute_metrics_step(logits.reshape(-1, 1), batch['labels'].view(-1, 1),
                                    self.step_metrics, self.epoch_metrics)
         
         if self.debug:
@@ -120,7 +120,7 @@ class LightningWrapper(L.LightningModule):
         loss, logits = self.classifier.predict(**batch)
         mean_loss = self.loss_metric(loss)
         self.log('val_loss', loss, logger=True, prog_bar=True, sync_dist=True)
-        self._compute_metrics_step(logits.reshape(-1, self.classifier.n_labels), batch['labels'].view(-1, self.classifier.n_labels), 
+        self._compute_metrics_step(logits.reshape(-1, 1), batch['labels'].view(-1, 1), 
                                    self.val_step_metrics, self.val_epoch_metrics)
     
     def test_step(self, batch, batch_idx):
@@ -137,7 +137,7 @@ class LightningWrapper(L.LightningModule):
         # Log and compute metrics
         mean_loss = self.loss_metric(loss)
         self.log('test_loss_mean', mean_loss, logger=True, prog_bar=True, sync_dist=True)
-        self._compute_metrics_step(logits.reshape(-1, self.classifier.n_labels), batch['labels'].view(-1, self.classifier.n_labels), 
+        self._compute_metrics_step(logits.reshape(-1, 1), batch['labels'].view(-1, 1), 
                                    self.test_step_metrics, self.test_epoch_metrics)
 
     def on_train_epoch_end(self) -> None:
