@@ -43,7 +43,7 @@ def create_fold_fastas(prot_info_path, splits_folder, prefix=None):
                         print(f"Warning: ID {df_id} found in splits but missing in sequence data.")
 
                 # 4. Write the FASTA file for this specific fold and category
-                filename = f"{pardir}/{prefix}_fold_{i}_{category}.fasta"
+                filename = f"{pardir}/{category}.fasta"
                 if records:
                     with open(filename, 'w') as output_handle:
                         SeqIO.write(records, output_handle, "fasta")
