@@ -3,7 +3,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import colormaps
 from pathlib import Path
-from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.model_selection import StratifiedKFold
+from Bio.SeqRecord import SeqRecord
+from Bio.Seq import Seq
+from Bio import SeqIO
 import numpy as np
 import os
 import json
@@ -116,7 +119,7 @@ def split_data_per_residue(data, set_labels, seed=42):
         for train, test in cv.split(filtered.index, filtered['length_class']):
             orig_indices_train = filtered.index[train].tolist()
             orig_indices_test = filtered.index[test].tolist()
-            splits.append({'train' : orig_indices_train, 'test' : orig_indices_test})
+            splits.append({'train' : orig_indices_train, 'test' : orig_indices_test, 'total' : list(filtered.index)})
 
         total_splits[label] = splits
     return total_splits
