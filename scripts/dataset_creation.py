@@ -100,7 +100,7 @@ def compute_site_labels(data : pd.DataFrame, res_sets, set_labels):
 def filter_dataset(df : pd.DataFrame, set_label):
     return df[df[f'{set_label}_sites'].apply(lambda x: len(x) > 0)].copy()
 
-def write_dataset_info(all_splits, out_folder):
+def write_dataset_info(all_splits, out_folder, suffix=''):
     res = {}
     for label, splits in all_splits.items():
         res[label] = {}
@@ -108,7 +108,7 @@ def write_dataset_info(all_splits, out_folder):
             for data_type in fold:
                 res[label][f'fold_{i}_{data_type}_size'] = len(fold[data_type])
 
-    pd.DataFrame.from_dict(res).T.to_csv(os.path.join(out_folder, 'dataset_info.csv'), sep=',')
+    pd.DataFrame.from_dict(res).T.to_csv(os.path.join(out_folder, f'dataset_info{suffix}.csv'), sep=',')
 
 def split_data_per_residue(data, set_labels, seed=42):
     total_splits = {}
@@ -127,7 +127,7 @@ def split_data_per_residue(data, set_labels, seed=42):
 def save_dataset(all_splits, out_folder):
     for label, splits in all_splits.items():
         with open(os.path.join(out_folder, f"splits_{label}.json"), 'w') as f:
-            json.dump(splits, f)
+            json.dump(splits, f, indent='\t')
         
 def extract_representatives(data):
     reps = data['cluster_rep'].unique()
