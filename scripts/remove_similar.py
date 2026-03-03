@@ -4,10 +4,14 @@ import os
 from pathlib import Path
 import argparse
 
-def find_similar_prots(similarity_df, prot_info, threshold=0.3):
+def find_similar_prots(similarity_df : pd.DataFrame, prot_info, threshold=0.3):
     # Read the similarity file into a DataFrame
     df = similarity_df[similarity_df['query_id'] != similarity_df['target_id']]
-    to_remove_ids = set(df['target_id'][df['similarity'] > threshold])
+    to_remove_ids = set()
+    for _, row in df.iterrows():
+        if row['similarity'] > threshold and row['query_id'] not in to_remove_ids:
+            to_remove_ids.add(row['target_id'])
+            
     to_remove_indices = set(prot_info[prot_info['id'].apply(lambda x: x in to_remove_ids)].index)
     print(f"Number of target (train) proteins removed: {len(to_remove_ids)}")
 
@@ -19,7 +23,20 @@ def remove_similar_prots_splits(similarity_path, prot_info_path, splits_path, th
         splits = json.load(f)
     prot_info = pd.read_json(prot_info_path)
 
-    indices = [int(i) for i in splits[0]['total']]
+    if 'total' in splits[0]:
+        indices = [int(i) for i in splits[0]['total']]
+    else:
+        indices = set()
+        # In order to ensure that truly all unique indices are captured
+        for split in splits:
+            for idx in split['test']:
+                indices.add(idx)
+
+            for idx in split['train']:
+                indices.add(idx)
+
+        indices = list(indices)
+
     ids  = set(prot_info.loc[indices, 'id'])
     relevant_similarities = similarity_df[similarity_df.apply(lambda row: row['query_id'] in ids and row['target_id'] in ids, axis=1)]
     _, indices_to_remove = find_similar_prots(relevant_similarities, prot_info, threshold)
