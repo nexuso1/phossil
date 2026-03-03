@@ -35,7 +35,10 @@ class FullProteinDataset:
         test = self.prot_info.loc[self.split_info[i]['test']]
         train = self.prot_info.loc[self.split_info[i]['train']]
         test_ds = ProteinDataset(test)
-        train, dev = train_test_split(train, train_size=0.8, random_state=42)
+        if 'dev' in self.split_info[i].keys():
+            dev = self.prot_info.loc[self.split_info[i]['dev']]
+        else:
+            train, dev = train_test_split(train, train_size=0.8, random_state=42)
         train_ds = ProteinDataset(train)
         dev_ds = ProteinDataset(dev)
 
