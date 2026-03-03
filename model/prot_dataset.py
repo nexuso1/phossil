@@ -36,6 +36,7 @@ class FullProteinDataset:
         train = self.prot_info.loc[self.split_info[i]['train']]
         test_ds = ProteinDataset(test)
         if 'dev' in self.split_info[i].keys():
+            print('Using dev partition from the split')
             dev = self.prot_info.loc[self.split_info[i]['dev']]
         else:
             train, dev = train_test_split(train, train_size=0.8, random_state=42)
