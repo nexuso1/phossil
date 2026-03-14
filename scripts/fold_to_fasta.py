@@ -8,10 +8,11 @@ from pathlib import Path
 import os
 import glob
 
-def add_hashes(sequence, indices):
+def add_hashes(sequence, indices, residues):
     buffer = list(sequence)
     for i in indices:
-        buffer[i] = buffer[i] + '#'
+        if sequence[i] in residues:
+            buffer[i] = buffer[i] + '#'
 
     return "".join(buffer)
 
@@ -49,7 +50,7 @@ def create_fold_fastas(prot_info_path, splits_folder, prefix=None, hashes=False)
                         )
                         records.append(record)
                         if hashes:
-                            with_hashes = add_hashes(prot_info.loc[df_id]['sequence'], [int(i) - 1 for i in prot_info.loc[df_id]['sites']])
+                            with_hashes = add_hashes(prot_info.loc[df_id]['sequence'], [int(i) - 1 for i in prot_info.loc[df_id]['sites']], residues=set(list(res)))
                             hash_record = SeqRecord(
                                 Seq(with_hashes),
                                 id=prot_info.loc[df_id]['id'],
