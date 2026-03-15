@@ -60,6 +60,11 @@ class SelectiveFinetuningClassifierConfig(TokenClassifierConfig):
     unfreeze_indices : list[int] = field(default_factory= lambda : [-1])
 
 @dataclass
+class RecyclingFinetuningClassifierConfig(TokenClassifierConfig):
+    unfreeze_indices : list[int] = field(default_factory= lambda : [-1])
+    n_steps : int = 5
+
+@dataclass
 class LMFinetuningClassifierConfig(LMModelConfig):
     unfreeze_indices : list[int] = field(default_factory= lambda : [-1])
 
@@ -381,3 +386,39 @@ class DummyClassifier(TokenClassifier):
     
     def train_predict(self, input_ids: torch.Tensor, labels: torch.Tensor, attention_mask: torch.Tensor = None, return_dict=False, **kwargs):
         return self.predict(input_ids, attention_mask, return_dict, labels, **kwargs)
+
+class LMFinetuningClassifier(LMModel):
+    def __init__(self, config: SelectiveFinetuningClassifierConfig, base_model: Module) -> None:
+        super().__init__(config, base_model)
+        self.classifier = torch.nn.Linear(base_model.config.hidden_size, 1)
+        self.init_weights(self.classifier)
+        self.set_base_requires_grad(False)
+        self.set_indexed_layers_grad(config.unfreeze_indices, True)
+        
+    def set_indexed_layers_grad(self, indices : list[int], req_grad_value : bool):
+        indices = set(indices)
+        self.modified_indices = indices
+        param_list = list(self.base.esm.encoder.layer.named_children())
+        for i in indices:
+            # index 0 contains the name, 1 the parameter
+            for param in param_list[i][1].parameters():
+                param.requires_grad = req_grad_value
+
+    def forward(self, input_ids, attention_mask, **kwargs):
+        base_output = self.base(attention_mask=attention_mask, input_ids=input_ids, output_hidden_states=True)
+        return self.classifier(base_output.hidden_states[-1]), base_output
+
+class RecyclingFinetuningClassifier(SelectiveFinetuningClassifier):
+    def __init__(self, config: RecyclingFinetuningClassifierConfig, base_model: Module) -> None:
+        super().__init__(config, base_model)
+
+    def classifier_features(self, inputs, **kwargs):
+        recycled_state = inputs
+        # Assumes indices are not separated
+        for i in sorted(self.modified_indices):
+            recycled_state = recycled_state + self.base.encoder.layer[i](recycled_state)
+        
+        if self.base.encoder.emb_layer_norm_after:
+            recycled_state = self.base.encoder.emb_layer_norm_after(recycled_state)
+
+        return recycled_state
