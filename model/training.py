@@ -275,16 +275,21 @@ def prepare_model(args, create_model_fn):
 def handle_metadata(args, n_folds=5):
     if not args.checkpoint_path:
         # Create metadata
+
         meta = Metadata()
         meta.data = {'args' : args }
         meta.data['current_fold'] = 0
         meta.data['test_metrics'] = [{} for _ in range(n_folds)]
         meta.save(args.logdir)
     else:
+        # Parse info from the metadata file
+
         par_dir = Path(args.checkpoint_path).parent
         chkpt_path = args.checkpoint_path
         with open(f'{par_dir.parent}/metadata.json', 'r') as f:
             meta = Metadata(**json.load(f))
+            
+            # Fix old way of saving metada if applicable
             if 'current_fold' not in meta.data:
                 meta.data['current_fold'] = int(par_dir.name[-1])
 
@@ -292,6 +297,8 @@ def handle_metadata(args, n_folds=5):
             if len(metrics) < n_folds:
                 for _ in range(n_folds - len(metrics)):
                     metrics.append({})
+
+            # Retrieve training args from the existing metadata
             for k, v in meta.data['args'].items():
                 args.__setattr__(k, v)
         args.checkpoint_path = chkpt_path
@@ -356,7 +363,7 @@ def run_training(args : Namespace, create_model_fn):
     master_logdir = args.logdir
 
     for fold in range(meta.data['current_fold'], full_dataset.n_splits):
-        
+
         print(f'Current fold: {fold}')
         train_ds, dev_ds, test_ds = full_dataset.get_fold(fold)
         
