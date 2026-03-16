@@ -247,8 +247,21 @@ def load_phospho_epsd(path : str):
 
     return res
 
+def parse_residues(residue_string):
+    try:
+        residues = literal_eval(residue_string)
+    except ValueError:
+        residues = residue_string
+
+    if type(residues) is str:
+        print('Covnerting input residues to list')
+        residues = list(residues)
+
+    return residues
+
 def prepare_datasets(args, ignore_label):
-    prot_info = load_prot_data(args.prot_info_path, residues=literal_eval(args.residues), ignore_index=ignore_label)
+
+    prot_info = load_prot_data(args.prot_info_path, residues=parse_residues(args.residues), ignore_index=ignore_label)
     with open(args.dataset_path, 'r') as f:
         split_info = json.load(f)
     
@@ -256,7 +269,7 @@ def prepare_datasets(args, ignore_label):
 
 
 def prepare_full_dataset(args, ignore_label):
-    prot_info = load_prot_data(args.prot_info_path, residues=literal_eval(args.residues), ignore_index=ignore_label)
+    prot_info = load_prot_data(args.prot_info_path, residues=parse_residues(args.residues), ignore_index=ignore_label)
     with open(args.dataset_path, 'r') as f:
         split_info = json.load(f)
 
