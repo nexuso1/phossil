@@ -58,6 +58,7 @@ class KinaseClassifierConfig(EncoderClassifierConfig):
 @dataclass
 class SelectiveFinetuningClassifierConfig(TokenClassifierConfig):
     unfreeze_indices : list[int] = field(default_factory= lambda : [-1])
+    dropout_rate = 0
 
 @dataclass
 class RecyclingFinetuningClassifierConfig(TokenClassifierConfig):
@@ -353,6 +354,9 @@ class SelectiveFinetuningClassifier(TokenClassifier):
         self.init_weights(self.classifier)
         self.set_base_requires_grad(False)
         self.set_indexed_layers_grad(config.unfreeze_indices, True)
+
+        # Overrides dropout in the unfrozen base model layers
+        self.set_dropout_unfrozen()
         
     def set_indexed_layers_grad(self, indices : list[int], req_grad_value : bool):
         indices = set(indices)
@@ -362,6 +366,18 @@ class SelectiveFinetuningClassifier(TokenClassifier):
             # index 0 contains the name, 1 the parameter
             for param in param_list[i][1].parameters():
                 param.requires_grad = req_grad_value
+
+    def set_dropout_prob(self, model, prob):
+        """
+        Sets the dropout probability for all dropout layers in a model.
+        """
+        for m in model.modules():
+            if isinstance(m, (torch.nn.Dropout)):
+                m.p = prob
+
+    def set_dropout_unfrozen(self):
+        for i in self.modified_indices:
+            self.set_dropout_prob(self.base.encoder.layer[i], self.config.dropout_rate)
 
 class LMFinetuningClassifier(LMModel):
     def __init__(self, config: SelectiveFinetuningClassifierConfig, base_model: Module) -> None:
