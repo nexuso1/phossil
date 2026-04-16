@@ -330,7 +330,22 @@ class RNNTokenClassifier(TokenClassifier):
         sequence_output = outputs[0]
         classifier_features = self.classifier_features(sequence_output, batch_lens=batch_lens)
         return self.classifier(classifier_features, lengths=torch.sum(attention_mask, -1)), outputs
-    
+
+class BaselineClassifier(TokenClassifier):
+    """
+    Linear classifier on base model embeddings.
+    """
+    def __init__(self, config, base_model):
+        super().__init__(config, base_model)
+        self.classifier = torch.nn.Linear(base_model.config.hidden_size, config.n_labels)
+        self.init_weights(self.classifier)
+        self.set_base_requires_grad(False)
+        self.base.eval()
+
+    def forward(self, input_ids=None, attention_mask=None, **kwargs):
+        self.base.eval()
+        return super().forward(input_ids, attention_mask, **kwargs)
+
 class SelectiveFinetuningClassifier(TokenClassifier):
     def __init__(self, config: SelectiveFinetuningClassifierConfig, base_model: Module) -> None:
         super().__init__(config, base_model)

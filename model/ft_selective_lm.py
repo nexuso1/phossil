@@ -1,4 +1,4 @@
-# This file is the main way to run traninig on finetuning models
+# This file is the main way to run training on finetuning + language modeling models
 
 import ast
 from esm_train import get_esm
