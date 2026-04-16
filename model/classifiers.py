@@ -416,7 +416,15 @@ class RecyclingFinetuningClassifier(SelectiveFinetuningClassifier):
         recycled_state = inputs
         # Assumes indices are not separated
         for i in sorted(self.modified_indices):
-            recycled_state = recycled_state + self.base.encoder.layer[i](recycled_state)
+            if type(recycled_state) is tuple:
+                for item in recycled_state:
+                    print(item)
+                    
+            base_out = self.base.encoder.layer[i](recycled_state)
+            if type(base_out) is tuple:
+                base_out = base_out[0]
+            recycled_state = recycled_state + base_out
+            
         
         if self.base.encoder.emb_layer_norm_after:
             recycled_state = self.base.encoder.emb_layer_norm_after(recycled_state)
