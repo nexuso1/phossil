@@ -161,12 +161,14 @@ def prep_batch(data, tokenizer, modify_prob=0, mask_prob=0.7, rand_prob=0.15, su
     batch = tokenizer(sequences, padding='longest', return_tensors="pt")
     sequence_length = batch["input_ids"].shape[1]
 
-    # Keep original ids as targets for MLM
-    if modify_prob > 0 and mask_prob > 0:
-        batch['orig_ids'] = batch['input_ids']
 
-    batch['input_ids'] = perturb_batch(batch['input_ids'], modify_prob=modify_prob, random_prob=rand_prob,
-                                        sub_prob=sub_prob, mask_prob=mask_prob)
+    if modify_prob > 0:
+        # Keep original ids as targets for MLM
+        if mask_prob > 0:
+            batch['orig_ids'] = batch['input_ids']
+
+        batch['input_ids'] = perturb_batch(batch['input_ids'], modify_prob=modify_prob, random_prob=rand_prob,
+                                            sub_prob=sub_prob, mask_prob=mask_prob)
     # Pad the labels correctly
     batch['labels'] = np.array([[ignore_label] + list(label) + [ignore_label] * (sequence_length - len(label) - 1) for label in labels])
     batch['labels'] = torch.as_tensor(batch['labels'], dtype=torch.float32)
