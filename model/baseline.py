@@ -5,9 +5,7 @@ from classifiers import BaselineClassifier, TokenClassifierConfig
 
 def create_model(args):
     esm, tokenizer = get_esm(args.type)
-    indices = ast.literal_eval(args.indices)
-    config = TokenClassifierConfig(n_labels=1,loss=create_loss(args), unfreeze_indices=indices,
-                                                 base_type=args.type)
+    config = TokenClassifierConfig(n_labels=1,loss=create_loss(args), base_type=args.type)
     model = BaselineClassifier(base_model=esm, config=config)
 
     return model, tokenizer
