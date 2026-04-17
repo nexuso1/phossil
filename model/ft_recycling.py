@@ -7,7 +7,7 @@ def create_model(args):
     esm, tokenizer = get_esm(args.type)
     indices = ast.literal_eval(args.indices)
     config = RecyclingFinetuningClassifierConfig(n_labels=1,loss=create_loss(args), unfreeze_indices=indices,
-                                                 base_type=args.type, n_steps=args.n_steps)
+                                                 base_type=args.type, n_steps=args.n_steps, dropout_rate=args.dropout)
     model = RecyclingFinetuningClassifier(base_model=esm, config=config)
 
     return model, tokenizer
