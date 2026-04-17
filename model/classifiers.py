@@ -5,7 +5,7 @@ from token_classifier_base import TokenClassifier, TokenClassifierConfig
 from lm_model_base import LMModelConfig, LMModel, LMModelOuptut
 from modules import RNNClassifier
 from dataclasses import dataclass, field
-from modules import Conv1dModel, ConvLayerConfig, SinPositionalEncoding, ResidualMLP, FusedMBConv1dModel, FusedMBConvConfig
+from modules import Conv1dModel, ConvLayerConfig, SinPositionalEncoding, ResidualMLP, FusedMBConv1dModel, FusedMBConvConfig, RecyclingEncoder, ResidualTransformerLayer
 
 import pandas as pd
 import torch
@@ -68,7 +68,14 @@ class RecyclingFinetuningClassifierConfig(TokenClassifierConfig):
 @dataclass
 class LMFinetuningClassifierConfig(LMModelConfig):
     unfreeze_indices : list[int] = field(default_factory= lambda : [-1])
-
+    
+@dataclass
+class RecyclingClassifierConfig(TokenClassifierConfig):
+    n_recycle_steps : int = 3
+    dim_model : int = 256
+    dim_ffw : int = 2048
+    n_heads : int = 8
+    n_enc_layers : int = 3
 
 class LinearClassifier(TokenClassifier):
     def __init__(self, config: TokenClassifierConfig, base_model: Module) -> None:
@@ -467,3 +474,28 @@ class RecyclingFinetuningClassifier(SelectiveFinetuningClassifier):
                 recycled_state = recycled_state.detach()
 
         return recycled_state
+    
+class RecyclingClassifier(TokenClassifier):
+    def __init__(self, base_model, config):
+        super().__init__(config, base_model)
+        
+        # Pos embeds from ESM-2 already in the embeddings
+        # self.pos_embed = SinPositionalEncoding(config.dim_model, 1024) # ESM has max 1024 tokens, incl. [cls]...[eos]
+        model_dim = base_model.config.hidden_size
+        self.encoder = RecyclingEncoder(model_dim, config.n_heads, config.n_enc_layers, config.n_recycle_steps,
+                                        dropout=config.dropout_rate, d_feedforward=config.dim_ffw)
+        self.output = torch.nn.Linear(model_dim, config.n_labels)
+
+    def forward(self, input_ids, attention_mask, **kwargs):
+        base_out = self.base(input_ids=input_ids, attention_mask=attention_mask)
+        x = base_out[0]
+        # x = x + self.pos_embed(x)
+        if 'no_flash_attn' in kwargs and kwargs['no_flash_attn']:
+            # Transform the inputs to sequence-first. Expecting batch size of 1
+            x = x.moveaxis(0, 1).squeeze()
+            x = self.encoder(x)
+            x = x.unsqueeze(0)
+        else:
+            x = self.encoder(x, mask=attention_mask)
+
+        return self.output(x), base_out
