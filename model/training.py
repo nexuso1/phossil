@@ -193,6 +193,7 @@ class LightningWrapper(L.LightningModule):
         Based on https://github.com/huggingface/transformers/blob/main/src/transformers/trainer_pt_utils.py#L1026
         """
         result = []
+        
         for name, child in model.named_children():
             child_params = self.get_parameter_names(child, forbidden_layer_types)
             result += [
@@ -200,12 +201,11 @@ class LightningWrapper(L.LightningModule):
                 for n in child_params
                 if not isinstance(child, tuple(forbidden_layer_types))
             ]
+        result += [k for k in model._parameters]
 
         return result
 
     def configure_optimizers(self):
-        
-
         optimizer_kwargs = {
                 "betas": (0.9, 0.98),
                 "eps": 1e-8,
