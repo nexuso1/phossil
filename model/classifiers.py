@@ -76,7 +76,7 @@ class RecyclingClassifierConfig(TokenClassifierConfig):
     dim_ffw : int = 2048
     n_heads : int = 8
     n_enc_layers : int = 3
-    kernel_size = 15
+    kernel_size = 31
     use_cnn : bool = False
 
 class LinearClassifier(TokenClassifier):
@@ -502,7 +502,7 @@ class RecyclingClassifier(TokenClassifier):
     def forward(self, input_ids, attention_mask, **kwargs):
         base_out = self.base(input_ids=input_ids, attention_mask=attention_mask)
         x = base_out[0]
-        
+
         if self.config.use_cnn:
             x = x.transpose(1, 2)
         x = self.project(x)
