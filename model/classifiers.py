@@ -77,7 +77,7 @@ class RecyclingClassifierConfig(TokenClassifierConfig):
     n_heads : int = 8
     n_enc_layers : int = 3
     kernel_size = 15
-        
+    use_cnn : bool = False
 
 class LinearClassifier(TokenClassifier):
     def __init__(self, config: TokenClassifierConfig, base_model: Module) -> None:
@@ -502,7 +502,14 @@ class RecyclingClassifier(TokenClassifier):
     def forward(self, input_ids, attention_mask, **kwargs):
         base_out = self.base(input_ids=input_ids, attention_mask=attention_mask)
         x = base_out[0]
+        
+        if self.config.use_cnn:
+            x = x.transpose(1, 2)
         x = self.project(x)
+
+        if self.config.use_cnn:
+            x = x.transpose(1, 2)
+
         # x = x + self.pos_embed(x)
         if 'no_flash_attn' in kwargs and kwargs['no_flash_attn']:
             # Transform the inputs to sequence-first. Expecting batch size of 1
