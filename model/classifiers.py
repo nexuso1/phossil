@@ -72,10 +72,12 @@ class LMFinetuningClassifierConfig(LMModelConfig):
 @dataclass
 class RecyclingClassifierConfig(TokenClassifierConfig):
     n_recycle_steps : int = 3
-    dim_model : int = 256
+    dim_model : int|None = None
     dim_ffw : int = 2048
     n_heads : int = 8
     n_enc_layers : int = 3
+    kernel_size = 15
+        
 
 class LinearClassifier(TokenClassifier):
     def __init__(self, config: TokenClassifierConfig, base_model: Module) -> None:
@@ -481,14 +483,26 @@ class RecyclingClassifier(TokenClassifier):
         
         # Pos embeds from ESM-2 already in the embeddings
         # self.pos_embed = SinPositionalEncoding(config.dim_model, 1024) # ESM has max 1024 tokens, incl. [cls]...[eos]
-        model_dim = base_model.config.hidden_size
+        model_dim = base_model.config.hidden_size if not config.dim_model else config.dim_model
+        self.create_projection_layer(config)
         self.encoder = RecyclingEncoder(model_dim, config.n_heads, config.n_enc_layers, config.n_recycle_steps,
                                         dropout=config.dropout_rate, d_feedforward=config.dim_ffw)
         self.output = torch.nn.Linear(model_dim, config.n_labels)
 
+    def create_projection_layer(self, config):
+        if config.dim_model:
+            input_dim = self.base.config.hidden_size
+            if config.use_cnn:
+                self.project = torch.nn.Conv1d(in_channels=input_dim, out_channels=config.dim_model, kernel_size=config.kernel_size, padding=config.kernel_size // 2)
+            else:
+                self.project = torch.nn.Linear(input_dim, config.dim_model)
+        else:
+            self.project = torch.nn.Identity()
+
     def forward(self, input_ids, attention_mask, **kwargs):
         base_out = self.base(input_ids=input_ids, attention_mask=attention_mask)
         x = base_out[0]
+        x = self.project(x)
         # x = x + self.pos_embed(x)
         if 'no_flash_attn' in kwargs and kwargs['no_flash_attn']:
             # Transform the inputs to sequence-first. Expecting batch size of 1
