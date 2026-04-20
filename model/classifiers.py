@@ -452,18 +452,6 @@ class RecyclingFinetuningClassifier(SelectiveFinetuningClassifier):
     def __init__(self, config: RecyclingFinetuningClassifierConfig, base_model: Module) -> None:
         super().__init__(config, base_model)
 
-<<<<<<< HEAD
-    def classifier_features(self, inputs, **kwargs):
-        recycled_state = inputs
-        # Assumes indices are sequential (no layers in-between)
-        for i in sorted(self.modified_indices):
-            recycled_state = recycled_state + self.base.encoder.layer[i](recycled_state)
-        
-        if self.base.encoder.emb_layer_norm_after:
-            recycled_state = self.base.encoder.emb_layer_norm_after(recycled_state)
-=======
->>>>>>> a1b32b0c80447a3763b8b6eac02727ae40e9efc5
-
     def recycle_iteration(self, prev : torch.Tensor):
         # Assumes indices in a sequence
         for i in sorted(self.modified_indices):
