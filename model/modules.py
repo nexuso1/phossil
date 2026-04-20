@@ -321,3 +321,70 @@ class FusedMBConv1D(torch.nn.Module):
             x = x + inputs
         
         return x.moveaxis(1, -1)
+
+class ResidualTransformerLayer(torch.nn.Module):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1):
+        super().__init__()
+        self.self_attn = torch.nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
+        
+        # Implementation of Feedforward block
+        self.linear1 = torch.nn.Linear(d_model, dim_feedforward)
+        self.dropout = torch.nn.Dropout(dropout)
+        self.linear2 = torch.nn.Linear(dim_feedforward, d_model)
+
+        # Normalization layers
+        self.norm1 = torch.nn.LayerNorm(d_model)
+        self.norm2 = torch.nn.LayerNorm(d_model)
+        self.dropout1 = torch.nn.Dropout(dropout)
+        self.dropout2 = torch.nn.Dropout(dropout)
+
+    def forward(self, x, mask=None):
+        # 1. Multi-head Attention + Residual (Pre-LN style)
+        # We normalize BEFORE the sub-layer and add the result back to the original input
+        residual = x
+        x = self.norm1(x)
+
+        # Some vals will become none otherwise, taken from ESM-2 repo
+        if mask is not None:
+            mask = mask.to(torch.float32)
+            mask = mask.masked_fill(
+                mask.to(torch.bool), -1e8 if x.dtype == torch.float32 else -1e4
+            )
+        attn_output, _ = self.self_attn(x, x, x, key_padding_mask=mask)
+        x = residual + self.dropout1(attn_output)
+
+        # 2. Feedforward + Residual (Pre-LN style)
+        residual = x
+        x = self.norm2(x)
+        ff_output = self.linear2(self.dropout(torch.relu(self.linear1(x))))
+        x = residual + self.dropout2(ff_output)
+        
+        return x
+    
+class RecyclingEncoder(torch.nn.Module):
+    def __init__(self, d_model, nhead, num_layers, num_recycles, dropout, d_feedforward):
+        super().__init__()
+        self.num_recycles = num_recycles
+        self.layers = torch.nn.ModuleList([
+            ResidualTransformerLayer(d_model, nhead, dropout=dropout, dim_feedforward=d_feedforward) for _ in range(num_layers)
+        ])
+        self.norm_final = torch.nn.LayerNorm(d_model)
+        #self.initial_state = torch.nn.Parameter(torch.zeros(d_model))
+
+    def forward(self, inputs, mask=None):
+        # Initial 'prev_f' state (could be zeros or a copy of x)
+        prev_f = inputs
+        for r in range(self.num_recycles + 1):
+            # AF2 Gradient Detachment: Only the last cycle contributes to training
+            if self.training and r < self.num_recycles:
+                prev_f = prev_f.detach()
+
+            # The current state is the sum of base ESM embeddings and previous refinements
+            out = inputs + prev_f 
+            
+            for layer in self.layers:
+                out = layer(out, mask=mask)
+            
+            prev_f = out # Update state for next recycle
+            
+        return self.norm_final(prev_f)

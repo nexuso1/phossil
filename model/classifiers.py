@@ -5,7 +5,7 @@ from token_classifier_base import TokenClassifier, TokenClassifierConfig
 from lm_model_base import LMModelConfig, LMModel, LMModelOuptut
 from modules import RNNClassifier
 from dataclasses import dataclass, field
-from modules import Conv1dModel, ConvLayerConfig, SinPositionalEncoding, ResidualMLP, FusedMBConv1dModel, FusedMBConvConfig
+from modules import Conv1dModel, ConvLayerConfig, SinPositionalEncoding, ResidualMLP, FusedMBConv1dModel, FusedMBConvConfig, RecyclingEncoder, ResidualTransformerLayer
 
 import pandas as pd
 import torch
@@ -58,16 +58,26 @@ class KinaseClassifierConfig(EncoderClassifierConfig):
 @dataclass
 class SelectiveFinetuningClassifierConfig(TokenClassifierConfig):
     unfreeze_indices : list[int] = field(default_factory= lambda : [-1])
+    dropout_rate = 0
 
 @dataclass
 class RecyclingFinetuningClassifierConfig(TokenClassifierConfig):
     unfreeze_indices : list[int] = field(default_factory= lambda : [-1])
-    n_steps : int = 5
+    n_steps : int = 3
 
 @dataclass
 class LMFinetuningClassifierConfig(LMModelConfig):
     unfreeze_indices : list[int] = field(default_factory= lambda : [-1])
-
+    
+@dataclass
+class RecyclingClassifierConfig(TokenClassifierConfig):
+    n_recycle_steps : int = 3
+    dim_model : int|None = None
+    dim_ffw : int = 2048
+    n_heads : int = 8
+    n_enc_layers : int = 3
+    kernel_size = 31
+    use_cnn : bool = False
 
 class LinearClassifier(TokenClassifier):
     def __init__(self, config: TokenClassifierConfig, base_model: Module) -> None:
@@ -330,7 +340,22 @@ class RNNTokenClassifier(TokenClassifier):
         sequence_output = outputs[0]
         classifier_features = self.classifier_features(sequence_output, batch_lens=batch_lens)
         return self.classifier(classifier_features, lengths=torch.sum(attention_mask, -1)), outputs
-    
+
+class BaselineClassifier(TokenClassifier):
+    """
+    Linear classifier on base model embeddings.
+    """
+    def __init__(self, config, base_model):
+        super().__init__(config, base_model)
+        self.classifier = torch.nn.Linear(base_model.config.hidden_size, config.n_labels)
+        self.init_weights(self.classifier)
+        self.set_base_requires_grad(False)
+        self.base.eval()
+
+    def forward(self, input_ids=None, attention_mask=None, **kwargs):
+        self.base.eval()
+        return super().forward(input_ids, attention_mask, **kwargs)
+
 class SelectiveFinetuningClassifier(TokenClassifier):
     def __init__(self, config: SelectiveFinetuningClassifierConfig, base_model: Module) -> None:
         super().__init__(config, base_model)
@@ -338,6 +363,9 @@ class SelectiveFinetuningClassifier(TokenClassifier):
         self.init_weights(self.classifier)
         self.set_base_requires_grad(False)
         self.set_indexed_layers_grad(config.unfreeze_indices, True)
+
+        # Overrides dropout in the unfrozen base model layers
+        self.set_dropout_unfrozen()
         
     def set_indexed_layers_grad(self, indices : list[int], req_grad_value : bool):
         indices = set(indices)
@@ -347,6 +375,18 @@ class SelectiveFinetuningClassifier(TokenClassifier):
             # index 0 contains the name, 1 the parameter
             for param in param_list[i][1].parameters():
                 param.requires_grad = req_grad_value
+
+    def set_dropout_prob(self, model, prob):
+        """
+        Sets the dropout probability for all dropout layers in a model.
+        """
+        for m in model.modules():
+            if isinstance(m, (torch.nn.Dropout)):
+                m.p = prob
+
+    def set_dropout_unfrozen(self):
+        for i in self.modified_indices:
+            self.set_dropout_prob(self.base.encoder.layer[i], self.config.dropout_rate)
 
 class LMFinetuningClassifier(LMModel):
     def __init__(self, config: SelectiveFinetuningClassifierConfig, base_model: Module) -> None:
@@ -412,6 +452,7 @@ class RecyclingFinetuningClassifier(SelectiveFinetuningClassifier):
     def __init__(self, config: RecyclingFinetuningClassifierConfig, base_model: Module) -> None:
         super().__init__(config, base_model)
 
+<<<<<<< HEAD
     def classifier_features(self, inputs, **kwargs):
         recycled_state = inputs
         # Assumes indices are sequential (no layers in-between)
@@ -420,5 +461,73 @@ class RecyclingFinetuningClassifier(SelectiveFinetuningClassifier):
         
         if self.base.encoder.emb_layer_norm_after:
             recycled_state = self.base.encoder.emb_layer_norm_after(recycled_state)
+=======
+>>>>>>> a1b32b0c80447a3763b8b6eac02727ae40e9efc5
+
+    def recycle_iteration(self, prev : torch.Tensor):
+        # Assumes indices in a sequence
+        for i in sorted(self.modified_indices):
+                    
+            base_out = self.base.encoder.layer[i](prev)
+            if type(base_out) is tuple:
+                base_out = base_out[0]
+            prev = prev + base_out
+
+        if self.base.encoder.emb_layer_norm_after:
+            prev = self.base.encoder.emb_layer_norm_after(prev)
+
+        return prev
+        
+    def classifier_features(self, first_pass_outputs : torch.Tensor, **kwargs):
+        recycled_state = first_pass_outputs.detach()
+        
+        for i in range(self.config.n_steps):
+            recycled_state = self.recycle_iteration(recycled_state)
+            if i < self.config.n_steps - 1:
+                recycled_state = recycled_state.detach()
 
         return recycled_state
+    
+class RecyclingClassifier(TokenClassifier):
+    def __init__(self, base_model, config):
+        super().__init__(config, base_model)
+        
+        # Pos embeds from ESM-2 already in the embeddings
+        # self.pos_embed = SinPositionalEncoding(config.dim_model, 1024) # ESM has max 1024 tokens, incl. [cls]...[eos]
+        model_dim = base_model.config.hidden_size if not config.dim_model else config.dim_model
+        self.create_projection_layer(config)
+        self.encoder = RecyclingEncoder(model_dim, config.n_heads, config.n_enc_layers, config.n_recycle_steps,
+                                        dropout=config.dropout_rate, d_feedforward=config.dim_ffw)
+        self.output = torch.nn.Linear(model_dim, config.n_labels)
+
+    def create_projection_layer(self, config):
+        if config.dim_model:
+            input_dim = self.base.config.hidden_size
+            if config.use_cnn:
+                self.project = torch.nn.Conv1d(in_channels=input_dim, out_channels=config.dim_model, kernel_size=config.kernel_size, padding=config.kernel_size // 2)
+            else:
+                self.project = torch.nn.Linear(input_dim, config.dim_model)
+        else:
+            self.project = torch.nn.Identity()
+
+    def forward(self, input_ids, attention_mask, **kwargs):
+        base_out = self.base(input_ids=input_ids, attention_mask=attention_mask)
+        x = base_out[0]
+
+        if self.config.use_cnn:
+            x = x.transpose(1, 2)
+        x = self.project(x)
+
+        if self.config.use_cnn:
+            x = x.transpose(1, 2)
+
+        # x = x + self.pos_embed(x)
+        if 'no_flash_attn' in kwargs and kwargs['no_flash_attn']:
+            # Transform the inputs to sequence-first. Expecting batch size of 1
+            x = x.moveaxis(0, 1).squeeze()
+            x = self.encoder(x)
+            x = x.unsqueeze(0)
+        else:
+            x = self.encoder(x, mask=attention_mask)
+
+        return self.output(x), base_out

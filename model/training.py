@@ -64,6 +64,7 @@ parser.add_argument('--rand_prob', help='Relative probability of randomly changi
                      default=0.15, type=float)
 parser.add_argument('--sub_prob', help='Relative probability of substituting input residues via a substitution matrix (BLOSUM62) during training. Only relevant if "modify_prob" > 0',
                      default=0.15, type=float)
+parser.add_argument('--fix_decay', type=bool, default=True, help="Do not apply weight decay to bias and layer norm parameters.")
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -185,11 +186,49 @@ class LightningWrapper(L.LightningModule):
     def on_test_epoch_end(self):
         self._shared_epoch_end('test')
 
+    def get_parameter_names(self, model : torch.nn.Module, forbidden_layer_types):
+        """
+        Returns the names of the model parameters that are not inside a forbidden layer.
+        
+        Based on https://github.com/huggingface/transformers/blob/main/src/transformers/trainer_pt_utils.py#L1026
+        """
+        result = []
+        
+        for name, child in model.named_children():
+            child_params = self.get_parameter_names(child, forbidden_layer_types)
+            result += [
+                f"{name}.{n}"
+                for n in child_params
+                if not isinstance(child, tuple(forbidden_layer_types))
+            ]
+        result += [k for k in model._parameters]
+
+        return result
+
     def configure_optimizers(self):
-        optim = torch.optim.AdamW(self.classifier.parameters(), 
-                                  lr=self.hparams.lr,
-                                  betas=(0.9, 0.98),
-                                  weight_decay=self.hparams.weight_decay)
+        optimizer_kwargs = {
+                "betas": (0.9, 0.98),
+                "eps": 1e-8,
+                'lr' : self.hparams.lr,
+            }
+        if self.hparams.fix_decay:
+            decay_parameters = self.get_parameter_names(self.classifier, [torch.nn.LayerNorm])
+            decay_parameters = [name for name in decay_parameters if "bias" not in name]
+            optimizer_parameters = [
+                {
+                    "params": [p for n, p in self.classifier.named_parameters() if n in decay_parameters],
+                    "weight_decay": self.hparams.weight_decay,
+                },
+                {
+                    "params": [p for n, p in self.classifier.named_parameters() if n not in decay_parameters],
+                    "weight_decay": 0.0,
+                },
+            ]
+        else:
+            optimizer_parameters = self.classifier.parameters()
+            optimizer_kwargs['weight_decay'] = self.hparams.weight_decay
+
+        optim = torch.optim.AdamW(optimizer_parameters, **optimizer_kwargs)
         if self.hparams.step_lr:
             # Needed for UniPTM training
             schedule = torch.optim.lr_scheduler.StepLR(optim, step_size=20, gamma=0.92)

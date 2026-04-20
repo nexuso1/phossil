@@ -1,4 +1,4 @@
-# This file is the main way to run traninig on finetuning models
+# This file is the main way to run training on finetuning + language modeling models
 
 import ast
 from esm_train import get_esm
@@ -9,7 +9,7 @@ def create_model(args):
     esm, tokenizer = get_esm(args.type, masked_lm=True)
     indices = ast.literal_eval(args.indices)
     config = LMFinetuningClassifierConfig(loss=create_loss(args), unfreeze_indices=indices,
-                                                 base_type=args.type)
+                                                 base_type=args.type, dropout=args.dropout)
     model = LMFinetuningClassifier(base_model=esm, config=config)
 
     return model, tokenizer
