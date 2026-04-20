@@ -414,7 +414,7 @@ class RecyclingFinetuningClassifier(SelectiveFinetuningClassifier):
 
     def classifier_features(self, inputs, **kwargs):
         recycled_state = inputs
-        # Assumes indices are not separated
+        # Assumes indices are sequential (no layers in-between)
         for i in sorted(self.modified_indices):
             recycled_state = recycled_state + self.base.encoder.layer[i](recycled_state)
         
