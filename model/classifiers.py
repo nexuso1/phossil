@@ -452,7 +452,6 @@ class RecyclingFinetuningClassifier(SelectiveFinetuningClassifier):
     def __init__(self, config: RecyclingFinetuningClassifierConfig, base_model: Module) -> None:
         super().__init__(config, base_model)
 
-
     def recycle_iteration(self, prev : torch.Tensor):
         # Assumes indices in a sequence
         for i in sorted(self.modified_indices):
