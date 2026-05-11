@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import colormaps
 from pathlib import Path
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from Bio.SeqRecord import SeqRecord
 from Bio.Seq import Seq
 from Bio import SeqIO
@@ -73,11 +73,6 @@ def reassign_representatives(data : pd.DataFrame):
     data.loc[fixed.index, 'cluster_rep'] = fixed['new_rep']
     return data
 
-def extract_representatives(data):
-    reps = data['cluster_rep'].unique()
-    rep_mask = data['id'].apply(lambda x : x in reps)
-    return data[rep_mask]
-
 def compute_length_labels(data):
     data['length'] = data['sequence'].apply(lambda x: len(x))
     _, length_bins = np.histogram(data['length'], 10)
@@ -110,23 +105,43 @@ def write_dataset_info(all_splits, out_folder, suffix=''):
 
     pd.DataFrame.from_dict(res).T.to_csv(os.path.join(out_folder, f'dataset_info{suffix}.csv'), sep=',')
 
-def split_data_per_residue(data, set_labels, seed=42):
-    total_splits = {}
+def get_kfold_spltis(data : pd.DataFrame, seed=42):
+    cv = StratifiedKFold(random_state=seed, shuffle=True)
+    splits = []
+    for train, test in cv.split(data.index, data['length_class']):
+        orig_indices_train = data.index[train].tolist()
+        orig_indices_test = data.index[test].tolist()
+        splits.append({'train' : orig_indices_train, 'test' : orig_indices_test, 'total' : list(data.index)})
+    return splits
+
+def get_release_split(data, dev_size=None, seed=42):
+    if not dev_size:
+                raise AssertionError('Dev size not set for release dataset preparation.')
+    try:
+        train, dev = train_test_split(data.index, test_size=dev_size, random_state=seed, stratify=data['length_class'])
+
+    except ValueError:
+        to_merge = data['length_class'] == data['length_class'].max()
+        print(data['length_class'].max())
+        data.loc[to_merge, 'length_class'] = data['length_class'].max() - 1
+        train, dev = train_test_split(data.index, test_size=dev_size, random_state=seed, stratify=data['length_class'])
+
+    return [{'train' : train.to_list(), 'dev' : dev.to_list(), 'total' : data.index.to_list()}]
+
+def split_data_per_residue(data : pd.DataFrame, set_labels : list[str], seed=42, release=False, dev_size : float|None =None):
+    total_splits : dict[str, list[dict[str, list[int]]]] = {}
     for label in set_labels:
         filtered = filter_dataset(data, label)
-        cv = StratifiedKFold(random_state=seed, shuffle=True)
-        splits = []
-        for train, test in cv.split(filtered.index, filtered['length_class']):
-            orig_indices_train = filtered.index[train].tolist()
-            orig_indices_test = filtered.index[test].tolist()
-            splits.append({'train' : orig_indices_train, 'test' : orig_indices_test, 'total' : list(filtered.index)})
-
-        total_splits[label] = splits
+        if release:
+            total_splits[label] = get_release_split(data, dev_size, seed)
+        else:
+            total_splits[label] = get_kfold_spltis(filtered, seed=seed)
+    
     return total_splits
 
-def save_dataset(all_splits, out_folder):
+def save_dataset(all_splits, out_folder, suffix=''):
     for label, splits in all_splits.items():
-        with open(os.path.join(out_folder, f"splits_{label}.json"), 'w') as f:
+        with open(os.path.join(out_folder, f"splits_{label}{suffix}.json"), 'w') as f:
             json.dump(splits, f, indent='\t')
         
 def extract_representatives(data):
@@ -134,12 +149,12 @@ def extract_representatives(data):
     rep_mask = data['id'].apply(lambda x : x in reps)
     return data[rep_mask]
 
-def create_splits(prot_info_path, clusters_path, res_sets):
+def create_splits(prot_info_path, clusters_path, res_sets, out_folder=None, release=False, release_dev_size=0.2):
     prot_info = pd.read_json(prot_info_path)
     clusters = pd.read_csv(clusters_path, sep='\t', names=['cluster_rep', 'cluster_mem'])
 
     clusters_name = Path(clusters_path).stem
-    out_folder = f'../data/dataset_{clusters_name}'
+    out_folder = f'../data/dataset_{clusters_name}' if not out_folder else out_folder
     os.makedirs(out_folder, exist_ok=True)
 
     # Join the cluster information with proteins that we have in the prot info
@@ -165,20 +180,24 @@ def create_splits(prot_info_path, clusters_path, res_sets):
     # Compute length labels for stratification
     joined = compute_length_labels(joined)
 
-    # Split data into folds using stratified k-fold cross-validation
-    all_splits = split_data_per_residue(joined, set_labels)
-    write_dataset_info(all_splits, out_folder)
-    save_dataset(all_splits, out_folder)
+    # Split data into folds using stratified k-fold cross-validation, or just train-dev if release dataset
+    all_splits = split_data_per_residue(joined, set_labels, release=release, dev_size=release_dev_size)
+    suffix = '_release' if release else ''
+    write_dataset_info(all_splits, out_folder, suffix=suffix)
+    save_dataset(all_splits, out_folder, suffix=suffix)
 
 def main(args):
     res_sets = eval(args.res_sets)
-    create_splits(args.prot_info, args.clusters, res_sets)
+    create_splits(args.prot_info, args.clusters, res_sets, release=args.release, out_folder=args.out_folder, 
+                  release_dev_size=args.release_dev_size)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--prot_info', type=str, default='../data/phosphosite_sequences/phosphosite_df.json')
-    parser.add_argument('--clusters', type=str, default='../data/clusters_cov1_c05.tsv')
+    parser.add_argument('--prot_info', type=str, default='../data/dbptm/dbptm_info.json')
+    parser.add_argument('--clusters', type=str, default='../data/dbptm/dbptm_clusters.tsv')
     parser.add_argument('--res_sets', type=str, default="[{'S'}, {'T'}, {'Y'}, {'S', 'T'}, {'S', 'T', 'Y'}]")
-
+    parser.add_argument('--release', action='store_true', default=True)
+    parser.add_argument('--out_folder', type=str, help='Output folder', default='../data/dbptm')
+    parser.add_argument('--release_dev_size', type=float, help='Release dataset dev size', default=0.2)
     args = parser.parse_args()
     main(args)
