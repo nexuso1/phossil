@@ -64,7 +64,7 @@ parser.add_argument('--rand_prob', help='Relative probability of randomly changi
                      default=0.15, type=float)
 parser.add_argument('--sub_prob', help='Relative probability of substituting input residues via a substitution matrix (BLOSUM62) during training. Only relevant if "modify_prob" > 0',
                      default=0.15, type=float)
-parser.add_argument('--fix_decay', action='store_true' help="Do not apply weight decay to bias and layer norm parameters.")
+parser.add_argument('--fix_decay', action='store_true', help="Do not apply weight decay to bias and layer norm parameters.")
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
