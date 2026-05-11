@@ -19,7 +19,7 @@ from functools import partial
 from torchvision.transforms import ToTensor
 from PIL import Image
 from token_classifier_base import TokenClassifier
-from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
+from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, Callback
 from utils import Metadata, sigmoid_focal_loss
 from lightning.pytorch.loggers import TensorBoardLogger
 from data_loading import prepare_datasets, prepare_full_dataset
@@ -64,7 +64,7 @@ parser.add_argument('--rand_prob', help='Relative probability of randomly changi
                      default=0.15, type=float)
 parser.add_argument('--sub_prob', help='Relative probability of substituting input residues via a substitution matrix (BLOSUM62) during training. Only relevant if "modify_prob" > 0',
                      default=0.15, type=float)
-parser.add_argument('--fix_decay', type=bool, default=False, help="Do not apply weight decay to bias and layer norm parameters.")
+parser.add_argument('--fix_decay', action='store_true' help="Do not apply weight decay to bias and layer norm parameters.")
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -489,15 +489,12 @@ def run_release_training(args, create_model_fn):
 def train_release_model(args, logdir, model, train, dev=None):
     logger = TensorBoardLogger(logdir, name=f'tb_log')
     # Training checkpoint (because having a defined ModelCheckpoint overrides the default checkpointing)
-    chkpt_callback = ModelCheckpoint(logdir, filename='chkpt')
-    callbacks = [chkpt_callback]
-    if dev is not None:
-        # Best model checkpoint
-        best_callback = ModelCheckpoint(logdir, filename='best', monitor='val_f1', mode='max',
-                                        save_on_train_epoch_end=1, auto_insert_metric_name=True)
+    # Best model checkpoint
+    best_callback = ModelCheckpoint(logdir, filename='best', monitor='val_f1', mode='max',
+                                    save_on_train_epoch_end=True, auto_insert_metric_name=True)
 
-        es_callback = EarlyStopping('val_f1', patience=args.patience, mode="max")
-        callbacks.extend([es_callback, best_callback])
+    es_callback = EarlyStopping('val_f1', patience=args.patience, mode="max")
+    callbacks : list[Callback] = [es_callback, best_callback]
 
     # Use deepspeed 
     if torch.cuda.device_count() > 1:
@@ -510,11 +507,11 @@ def train_release_model(args, logdir, model, train, dev=None):
     trainer.fit(model, train, dev, ckpt_path=args.checkpoint_path)
     best = torch.load(f'{logdir}/best.ckpt')
     model.load_state_dict(best['state_dict'])
-    final_metrics = trainer.test(model, train)
+    final_metrics = trainer.test(model, dev)
 
     # Save predictions into a DataFrame
     pred_df = pd.DataFrame.from_records(model.test_preds, columns=['logits', 'labels', 'sequence_indices', 'df_index'])
-    pred_df.to_json(f"{logdir}/final_preds.json")
+    pred_df.to_json(f"{logdir}/release_dev_preds.json")
     print(final_metrics)
 
     return model, final_metrics
