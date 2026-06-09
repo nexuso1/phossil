@@ -14,8 +14,8 @@ if str(SCRIPT_DIR) not in sys.path:
 
 @dataclass(frozen=True, eq=False, order=False)
 class Prediction:
-    scores : list[float] | np.ndarray
-    percentiles : list[float] | np.ndarray
+    scores : np.ndarray
+    percentiles : np.ndarray
     kinase_names : list[str]
 
     def to_dict(self):
@@ -31,30 +31,8 @@ def create_parser():
     parser.add_argument('--mode', type=str, choices=['percentile', 'threshold', 'sigmoid'], default='threshold')
     parser.add_argument('--threshold', type=float, default=0.9, help='Threhsold for percentile thresholding. Can be None. Used only with the "threshold" mode.')
     parser.add_argument('--out_path', type=str, default=None, help='Output path.')
+    parser.add_argument('--max_workers', type=str, default=15, help='Maximum number of worker processes.')
     return parser
-
-def predict_prot_kinases(sequence : str, sites : list[int]):
-    # Vals according to https://github.com/TheKinaseLibrary/kinase-library/blob/master/src/notebooks/substrate.ipynb
-    window_size = 15
-    padding = window_size // 2
-    modded_seq = list(sequence)
-    for site in sites:
-        modded_seq[site] = modded_seq[site].lower()
-    
-    modded_seq = ['_' for _ in range(padding)] + modded_seq + ['_' for _ in range(padding)]
-    site_preds : list[Prediction] = []
-    for site in sites:
-        window = modded_seq[site : site + window_size]
-        substrate = kl.Substrate("".join(window), pp=True)
-        preds = substrate.predict(percentile_round_digits=4, log2_score=False, pp=True, sort_by='name')
-
-        # Avoid 0 division by adding a small epsilon
-        preds.loc[preds.Score == 0, 'Score'] = 1e-8
-        preds['Score'] = np.log(preds['Score'].to_numpy())
-
-        site_preds.append(Prediction(scores=preds['Score'].to_numpy(), percentiles=preds['Percentile'].to_numpy(), kinase_names=list(preds.index)))
-
-    return site_preds
 
 def sigmoid(x : np.ndarray):
     return 1 / (1 + np.exp(-x))
@@ -68,15 +46,15 @@ def compute_kinase_labels(site_preds : list[Prediction], percentile_threshold : 
         return [sigmoid(pred.scores) for pred in site_preds]
     
     raise ValueError("Invalid mode.")
-    
-def compute_kinase_predictions(sequences : list[str], sites_list : list[int]):
-    return [predict_prot_kinases(seq, sites) for seq, sites in zip(sequences, sites_list)]
 
-def compute_kinase_predictions_parallel(sequences : list[str], sites_list : list[int], max_workers : int | None = None):
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        return list(executor.map(predict_prot_kinases, sequences, sites_list))
+def compute_kinase_predictions_parallel(sequences : list[str], sites_list : list[int], pred_func, max_workers : int | None = None):
+    if max_workers and max_workers > 1:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            return list(executor.map(pred_func, sequences, sites_list))
+    else:
+        return [pred_func(seq, sites) for seq, sites in zip(sequences, sites_list)]
 
-def compute_preds_and_labels(sequences : list[str], sites_list : list[list[int]], mode='threshold', percentile_threshold : float|None = 0.9):
+def compute_preds_and_labels(sequences : list[str], sites_list : list[list[int]], mode='threshold', percentile_threshold : float|None = 0.9, max_workers=1):
     residues = {'S', 'T', 'Y'}
     # Filter out non STY sites
     for i, sites in enumerate(sites_list):
@@ -86,9 +64,12 @@ def compute_preds_and_labels(sequences : list[str], sites_list : list[list[int]]
                 temp.append(site)
             else:
                 print(f"Skipped site {site} ({sequences[i][site]}) in {sites} for {sequences[i]}")
+        temp.sort()
         sites_list[i] = temp
     
-    preds = compute_kinase_predictions(sequences, sites_list)
+    #preds = compute_kinase_predictions(sequences, sites_list)
+    preds = compute_kinase_predictions_parallel(sequences, sites_list, compute_pps_preds, max_workers=max_workers)
+    
     labels = compute_kinase_labels(preds, percentile_threshold=percentile_threshold, mode=mode)
 
     records = []
@@ -99,13 +80,47 @@ def compute_preds_and_labels(sequences : list[str], sites_list : list[list[int]]
 
     return pd.DataFrame.from_records(records)
 
+def compute_pps_preds(sequence, sites):
+    """
+    Computes kinase predictions using the "score_protein" function from kinase-library.
+
+    Args:
+        sequence (str): Protein sequence
+        sites (list[int]): List of phosphorylated site indices
+
+    Returns:
+        list[Prediction]: _description_
+    """
+    modded_seq = list(sequence)
+    for site in sites:
+        modded_seq[site] = modded_seq[site].lower()
+    # Dict with 'ser_thr' and 'tyrosine' keys
+    # Contains columns <kinase_name>_score, <kinase_name>_score_rank, <kinase_name>_percentile, <kinase_name>_percentile rank
+    # for every kinase (among others not relevant right now)
+    preds = kl.score_protein("".join(modded_seq), pp=True, score_round_digits=4,percentile_round_digits=4)
+
+    site_preds = []
+    total_preds = pd.concat([preds['ser_thr'], preds['tyrosine']])
+    kinase_names = [val.removesuffix('_score') for val in total_preds.columns if val.endswith('_score')]
+    score_cols = [val for val in total_preds.columns if val.endswith('_score')]
+    percentile_cols = [val for val in total_preds.columns if val.endswith('_percentile')]
+    total_preds.loc[:, score_cols] = total_preds.loc[:, score_cols].fillna(-np.inf)
+    total_preds.loc[:, percentile_cols] = total_preds.loc[:, percentile_cols].fillna(0)
+    total_preds.sort_values('Position', inplace=True)
+    scores = total_preds[score_cols].to_numpy()
+    percentiles = total_preds[percentile_cols].to_numpy()
+    
+    for idx in range(scores.shape[0]):
+        site_preds.append(Prediction(scores[idx], percentiles[idx], kinase_names=kinase_names))
+    return site_preds
+
 if __name__ == '__main__':
     parser = create_parser()
     args = parser.parse_args()
     prot_info = pd.read_json(args.prot_info)
     sites = prot_info.sites.apply(lambda x: [int(site) - 1 for site in x])
     sequences = prot_info.sequence
-    output_df = compute_preds_and_labels(sequences, sites, mode=args.mode, percentile_threshold=args.threshold)
+    output_df = compute_preds_and_labels(sequences, sites, mode=args.mode, percentile_threshold=args.threshold, max_workers=args.max_workers)
     merged = pd.concat([prot_info, output_df], axis=1)
 
     if args.out_path == None:
