@@ -106,7 +106,6 @@ if __name__ == '__main__':
     sites = prot_info.sites.apply(lambda x: [int(site) - 1 for site in x])
     sequences = prot_info.sequence
     output_df = compute_preds_and_labels(sequences, sites, mode=args.mode, percentile_threshold=args.threshold)
-    output_df = prot_info.copy().add_suffix('_temp')
     merged = pd.concat([prot_info, output_df], axis=1)
 
     if args.out_path == None:
