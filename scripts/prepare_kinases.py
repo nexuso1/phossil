@@ -111,5 +111,5 @@ if __name__ == '__main__':
     if args.out_path == None:
         prot_info_name = os.path.basename(args.prot_info).removesuffix(".json")
         use_threshold = args.mode == 'threshold'
-        args.out_path = os.path.join(os.path.dirname(args.prot_info), f"{prot_info_name}_kinase_{args.mode}{"_" + str(args.threshold) if use_threshold else ""}.json")
+        args.out_path = os.path.join(os.path.dirname(args.prot_info), f"{prot_info_name}_kinase_{args.mode}{'_' + str(args.threshold) if use_threshold else ''}.json")
     merged.to_json(args.out_path, indent=2)
