@@ -68,7 +68,7 @@ def compute_preds_and_labels(sequences : list[str], sites_list : list[list[int]]
         sites_list[i] = temp
     
     #preds = compute_kinase_predictions(sequences, sites_list)
-    preds = compute_kinase_predictions_parallel(sequences, sites_list, compute_pps_preds, max_workers=max_workers)
+    preds = compute_kinase_predictions_parallel(sequences, sites_list, compute_single_prot_preds, max_workers=max_workers)
     
     labels = compute_kinase_labels(preds, percentile_threshold=percentile_threshold, mode=mode)
 
@@ -80,7 +80,7 @@ def compute_preds_and_labels(sequences : list[str], sites_list : list[list[int]]
 
     return pd.DataFrame.from_records(records)
 
-def compute_pps_preds(sequence, sites):
+def compute_single_prot_preds(sequence, sites):
     """
     Computes kinase predictions using the "score_protein" function from kinase-library.
 
