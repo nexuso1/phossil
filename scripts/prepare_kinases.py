@@ -240,8 +240,8 @@ def main(args):
         use_threshold = args.mode == 'threshold'
         args.out_path = os.path.join(os.path.dirname(args.prot_info), f"{prot_info_name}_kinase_{args.mode}{'_' + str(args.threshold) if use_threshold else ''}.json")
     labels = compute_kinase_labels(preds['kinase_scores'], preds['kinase_percentiles'], args.threshold, args.mode)
-    preds = preds.assign(kinase_labels=labels)
-    preds.to_json(args.out_path, indent=2)
+    prot_info.assign(kinase_labels=labels)
+    prot_info.to_json(args.out_path, indent=2)
 
 if __name__ == '__main__':
     parser = create_parser()
