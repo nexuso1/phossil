@@ -148,6 +148,12 @@ def compute_single_prot_preds(sequence, sites, kinase_to_index):
     modded_seq = list(sequence)
     for site in sites:
         modded_seq[site] = modded_seq[site].lower()
+
+    if len(sites) == 0:
+        return {
+            'percentiles' : [],
+            'scores' : []
+        }
         
     # Dict with 'ser_thr' and 'tyrosine' keys
     # Contains columns <kinase_name>_score, <kinase_name>_score_rank, <kinase_name>_percentile, <kinase_name>_percentile rank
