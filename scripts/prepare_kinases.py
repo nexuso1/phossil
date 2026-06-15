@@ -34,7 +34,7 @@ def compute_kinase_labels(scores, percentiles, percentile_threshold : float|None
     if mode == 'percentile':
         return [pred for pred in percentiles]
     if mode == 'sigmoid':
-        return [sigmoid(pred) for pred in scores]
+        return [sigmoid(pred / np.log2(np.e)) for pred in scores]
     
     raise ValueError("Invalid mode.")
 
@@ -238,9 +238,10 @@ def main(args):
     if args.out_path == None:
         prot_info_name = os.path.basename(args.prot_info).removesuffix(".json")
         use_threshold = args.mode == 'threshold'
-        args.out_path = os.path.join(os.path.dirname(args.prot_info), f"{prot_info_name}_kinase_{args.mode}{'_' + str(args.threshold) if use_threshold else ''}.json")
+        args.out_path = os.path.join(os.path.dirname(args.prot_info), 'kinase_labeled', f"{prot_info_name}_kinase_{args.mode}{'_' + str(args.threshold) if use_threshold else ''}.json")
+        os.makedirs(os.path.dirname(args.out_path), exist_ok=True)
     labels = compute_kinase_labels(preds['kinase_scores'], preds['kinase_percentiles'], args.threshold, args.mode)
-    prot_info.assign(kinase_labels=labels)
+    prot_info = prot_info.assign(kinase_labels=labels)
     prot_info.to_json(args.out_path, indent=2)
 
 if __name__ == '__main__':
