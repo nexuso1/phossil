@@ -122,21 +122,9 @@ class TokenClassifier(nn.Module):
             res = logits
             # Calculate the loss if labels are provided
             if labels is not None:
-                if attention_mask is not None:
-                    active_loss = attention_mask.view(-1) == 1
-                    active_logits = logits.reshape(-1, self.n_labels)
-                    active_labels = torch.where(
-                        active_loss, labels.view(-1), torch.tensor(self.ignore_index).type_as(labels)
-                    )
-                    valid_logits=active_logits[active_labels!=self.ignore_index].flatten()
-                    valid_labels=active_labels[active_labels!=self.ignore_index]
-                    loss = self.loss(valid_logits, valid_labels)
+                loss = self.compute_loss(logits, labels, attention_mask=attention_mask, **kwargs, **outputs)
 
-                else:
-                    
-                    loss = self.loss(logits.reshape(-1, self.n_labels), labels.reshape(-1))
-
-                res = (loss, logits)
+                res = (loss, logits, outputs)
             
             if not return_dict:
                 return res
@@ -147,6 +135,18 @@ class TokenClassifier(nn.Module):
                 'attentions' : outputs.attentions,
                 'outputs' : outputs
             }
+    
+    def compute_loss(self, logits, labels, attention_mask=None, **kwargs):
+        if attention_mask is None:
+            attention_mask = torch.ones_like(logits).bool()
+
+        active_labels = labels[attention_mask.bool()]
+        active_loss = active_labels.view(-1) != self.ignore_index
+        active_logits = logits[attention_mask.bool()].view(-1, self.n_labels)
+        valid_logits=active_logits.view(-1)[active_loss]
+        valid_labels=active_labels.view(-1)[active_loss]
+
+        return self.loss(valid_logits, valid_labels)
 
     def train_predict(self, input_ids : torch.Tensor, labels : torch.Tensor, attention_mask : torch.Tensor = None,
                       return_dict=False,  **kwargs):
@@ -160,18 +160,10 @@ class TokenClassifier(nn.Module):
         self.train()
         logits, outputs = self(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
 
-        if attention_mask is not None:
-            active_loss = labels.view(-1) != self.ignore_index
-            active_logits = logits.reshape(-1, self.n_labels)
-            valid_logits=active_logits[active_loss].flatten()
-            valid_labels=labels.view(-1)[active_loss]
-            loss = self.loss(valid_logits, valid_labels)
-            
-        else:
-            loss = self.loss(logits.view(-1, self.n_labels), labels.view(-1))
+        loss = self.compute_loss(logits, labels, attention_mask=attention_mask, **outputs, **kwargs)
 
         if not return_dict:
-            return loss, logits
+            return loss, logits, outputs
         
         return {
             'loss' : loss,

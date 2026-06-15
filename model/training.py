@@ -12,7 +12,7 @@ import json
 import pandas as pd
 
 from torchmetrics import F1Score, MatthewsCorrCoef, Precision, Recall, AUROC, \
-MeanMetric, AveragePrecision, PrecisionRecallCurve, MetricCollection
+MeanMetric, AveragePrecision, PrecisionRecallCurve, MetricCollection, ConfusionMatrix
 from torch.utils.data import DataLoader
 from data_loading import prep_batch
 from functools import partial
@@ -32,6 +32,7 @@ parser = ArgumentParser()
 parser.add_argument('--seed', type=int, help='Random seed', default=42)
 parser.add_argument('--batch_size', type=int, help='Batch size)', default=4)
 parser.add_argument('--epochs', type=int, help='Number of training epochs', default=20)
+parser.add_argument('--frozen_epochs', type=int, help='Number of training epochs with the base model frozen')
 parser.add_argument('--prot_info_path', type=str, 
                      help='Path to the protein dataset. Expects a dataframe with columns ("id", "sequence", "sites"). "sequence" is the protein AA string, "sites" is a list of phosphorylation sites.',
                      default='../data/phosphosite_sequences/phosphosite_df.json')
@@ -47,7 +48,7 @@ parser.add_argument('--lora', action='store_true', help='Use LoRA', default=Fals
 parser.add_argument('--dropout', type=float, help='Dropout probability', default=0)
 parser.add_argument('--type', help='ESM Model type', type=str, default='650M')
 parser.add_argument('--pos_weight', help='Positive class weight', type=float, default=3)
-parser.add_argument('--num_workers', help='Number of multiprocessign workers', type=int, default=0)
+parser.add_argument('--num_workers', help='Number of multiprocessing workers', type=int, default=0)
 parser.add_argument('--n_layers', help='Number of RNN/Transformer classifier layers', type=int, default=1)
 parser.add_argument('--checkpoint_path', help='Resume training from checkpoint', type=str, default=None)
 parser.add_argument('--model_path', help='Load model from this path (not a checkpoint)', type=str, default=None)
@@ -65,6 +66,8 @@ parser.add_argument('--rand_prob', help='Relative probability of randomly changi
 parser.add_argument('--sub_prob', help='Relative probability of substituting input residues via a substitution matrix (BLOSUM62) during training. Only relevant if "modify_prob" > 0',
                      default=0.15, type=float)
 parser.add_argument('--fix_decay', action='store_true', help="Do not apply weight decay to bias and layer norm parameters.")
+parser.add_argument('--kinase', action='store_true', help='Use kinase labels in prediction')
+parser.add_argument('--fold', type=int, default=None, help='Train only this fold index. Leave None for default all-fold training')
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -74,17 +77,18 @@ class LightningWrapper(L.LightningModule):
         super(LightningWrapper, self).__init__()
         self.classifier = module
         self.ds_size = ds_size
-        self.step_metrics = step_metrics
         self.logdir = logdir
-        self.test_step_metrics = step_metrics.clone(prefix='test_') 
-        self.val_step_metrics = step_metrics.clone(prefix='val_')
+        self.predicting_kinases = args.kinase
 
-        self.epoch_metrics = epoch_metrics
-        self.test_epoch_metrics = epoch_metrics.clone(prefix='test_')
-        self.val_epoch_metrics = epoch_metrics.clone(prefix='val_')
+        for prefix in ['train_', 'val_', 'test_']:
+            for kind, metrics in zip(['epoch', 'step'], [epoch_metrics, step_metrics]):
+                self.__setattr__(f'{prefix}{kind}_metrics', metrics.clone(prefix=prefix))
 
+                # Add kinase metrics if we are using them
+                if self.predicting_kinases:
+                    self.__setattr__(f'{prefix}kinase_{kind}_metrics', metrics.clone(prefix=f'{prefix}kinase_'))
+        
         self.loss_metric = MeanMetric()
-        self.prc = PrecisionRecallCurve('binary', ignore_index=self.classifier.ignore_index)
         self.test_preds = []
         self.debug = False
         if hasattr(args, "debug") and args.debug:
@@ -93,18 +97,20 @@ class LightningWrapper(L.LightningModule):
             
         self.save_hyperparameters(args)
 
-    def _compute_metrics_step(self, logits, labels, step_metrics, epoch_metrics):
+    def _compute_metrics_step(self, logits, labels, step_metrics, epoch_metrics, **kwargs):
         step_vals = step_metrics(logits, labels)
         epoch_metrics.update(logits, labels.int())
-        self.prc.update(logits, labels.int())
         self.log_dict(step_vals, sync_dist=True, prog_bar=True, logger=True)
 
     def training_step(self, batch, batch_idx):
-        loss, logits = self.classifier.train_predict(**batch)
-        mean_loss = self.loss_metric(loss)
+        loss, logits, outputs = self.classifier.train_predict(**batch)
         self.log('train_loss', loss, logger=True, prog_bar=True, sync_dist=True)
         self._compute_metrics_step(logits.reshape(-1, 1), batch['labels'].view(-1, 1),
-                                   self.step_metrics, self.epoch_metrics)
+                                   self.train_step_metrics, self.train_epoch_metrics)
+        
+        if self.predicting_kinases:
+            self._compute_metrics_step(outputs['kinase_logits'][batch['labels'] == 1].view(-1, 1), batch['kinase_labels'].view(-1, 1),
+                                       self.train_kinase_step_metrics, self.train_kinase_epoch_metrics)
         
         if self.debug:
             if self.print_counter >= 250:
@@ -116,75 +122,83 @@ class LightningWrapper(L.LightningModule):
             self.print_counter += 1
 
         return loss
+
+    def _eval_step(self, batch, batch_idx, type : str):
+        loss, logits, outputs = self.classifier.predict(**batch)
+        self.log(f'{type}_loss', loss, logger=True, prog_bar=True, sync_dist=True)
+        self._compute_metrics_step(logits.reshape(-1, 1), batch['labels'].view(-1, 1), 
+                                   self.__getattr__(f'{type}_step_metrics'), self.__getattr__(f'{type}_epoch_metrics'))
+        
+        if self.predicting_kinases:
+            self._compute_metrics_step(outputs['kinase_logits'][batch['labels'] == 1].reshape(-1, 1), batch['kinase_labels'].view(-1, 1),
+                                       self.__getattr__(f'{type}_kinase_step_metrics'), self.__getattr__(f'{type}_kinase_epoch_metrics'))
+            
+        return loss, logits, outputs
     
     def validation_step(self, batch, batch_idx):
-        loss, logits = self.classifier.predict(**batch)
-        mean_loss = self.loss_metric(loss)
-        self.log('val_loss', loss, logger=True, prog_bar=True, sync_dist=True)
-        self._compute_metrics_step(logits.reshape(-1, 1), batch['labels'].view(-1, 1), 
-                                   self.val_step_metrics, self.val_epoch_metrics)
+        self._eval_step(batch, batch_idx, 'val')
     
     def test_step(self, batch, batch_idx):
-        loss, logits = self.classifier.predict(**batch)
+        loss, logits, outputs = self._eval_step(batch, batch_idx, 'test')
+
         # Relevant positions mask
         mask = batch['labels'] != -1
         # Save test predictions
         for i in range(mask.shape[0]):
-            self.test_preds.append((logits[i][mask[i]].cpu().numpy().reshape(-1), # prediction logits
+            preds = (logits[i][mask[i]].cpu().numpy().reshape(-1), # prediction logits
                                     batch['labels'][i][mask[i]].cpu().numpy().reshape(-1), # labels
                                     (torch.nonzero(mask[i] ) - 1).cpu().numpy().reshape(-1), # sequence indices (0-based) of relevant positions
-                                    int(batch['indices'][i].cpu().numpy()))) # index into the test set
-        
-        # Log and compute metrics
-        mean_loss = self.loss_metric(loss)
-        self.log('test_loss_mean', mean_loss, logger=True, prog_bar=True, sync_dist=True)
-        self._compute_metrics_step(logits.reshape(-1, 1), batch['labels'].view(-1, 1), 
-                                   self.test_step_metrics, self.test_epoch_metrics)
+                                    int(batch['indices'][i].cpu().numpy()))
+            if self.predicting_kinases:
+                preds = preds + (outputs['kinase_logits'])
+
+            self.test_preds.append(preds) # index into the test set
 
     def on_train_epoch_end(self) -> None:
-        self.log_dict(self.epoch_metrics.compute(), logger=True, prog_bar=True, sync_dist=True)
-        self.loss_metric.reset()
-        self.epoch_metrics.reset()
-        self.step_metrics.reset() 
-        self.prc.reset()
- 
-    def _shared_epoch_end(self, mode='val'):
-        if mode == 'val':
-            epoch_metrics = self.val_epoch_metrics
-            step_metrics = self.val_step_metrics
-        else:
-            epoch_metrics = self.test_epoch_metrics
-            step_metrics = self.test_step_metrics
+        self.train_epoch_metrics.compute()
+        log_directly = { k : v for k, v in self.train_epoch_metrics.items() if not (k.endswith('prcurve') or k.endswith('confusion_matrix'))}
+        self.log_dict(log_directly, logger=True, prog_bar=True, sync_dist=True)
+
+    def _log_epoch_metrics(self, epoch_metrics):
+        epoch_metrics.compute()
+        log_directly = { k : v for k, v in epoch_metrics.items() if not (k.endswith('prcurve') or k.endswith('confusion_matrix'))}
+        self.log_dict(log_directly, prog_bar=True, logger=True, sync_dist=True)
         
-        self.log_dict(epoch_metrics.compute(), prog_bar=True, logger=True, sync_dist=True)
+        log_image_metrics = { k for k in epoch_metrics.keys() if (k.endswith('prcurve') or k.endswith('confusion_matrix'))}
+        for metric in log_image_metrics:
+            fig, ax = plt.subplots(figsize=(10, 10))
+            if metric.endswith('prcurve'):
+                epoch_metrics[metric].plot(ax=ax, score=True)
+            else:
+                epoch_metrics[metric].plot(ax=ax)
+            
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", bbox_inches="tight")
+            buf.seek(0)
+            im = ToTensor()(Image.open(buf))
 
-        fig, ax = plt.subplots(figsize=(10, 10))
+            self.logger.experiment.add_image(
+                metric,
+                im,
+                global_step=self.current_epoch,
+            )
+            epoch_metrics[metric].reset()
+            plt.close(fig=fig)
 
-        self.prc.plot(ax=ax, score=True)
-
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight")
-        buf.seek(0)
-        im = ToTensor()(Image.open(buf))
-
-        self.logger.experiment.add_image(
-            f"{mode}_prc",
-            im,
-            global_step=self.current_epoch,
-        )
-
-        self.loss_metric.reset()
-        epoch_metrics.reset()
-        step_metrics.reset()
-        self.prc.reset()
-
-        plt.close('all')
+    def _shared_epoch_end(self, mode):
+        epoch_metrics = self.__getattr__(f'{mode}_epoch_metrics')
+        step_metrics = self.__getattr__(f'{mode}_step_metrics')
+        self._log_epoch_metrics(epoch_metrics)
 
     def on_validation_epoch_end(self) -> None:
         self._shared_epoch_end('val')
-
+        if self.predicting_kinases:
+            self._shared_epoch_end('val_kinase')
+        
     def on_test_epoch_end(self):
         self._shared_epoch_end('test')
+        if self.predicting_kinases:
+            self._shared_epoch_end('test_kinase')
 
     def get_parameter_names(self, model : torch.nn.Module, forbidden_layer_types):
         """
@@ -243,7 +257,7 @@ class LightningWrapper(L.LightningModule):
 
 def save_model(args, model : TokenClassifier, name : str):
     """
-    Saves the model to the folder args.o if given, otherwise to args.logdir, with the given name.
+    Saves the model to the folder args.o if given, otherwise to args.logdir, with the batch['kinase_labels']given name.
     """
     if args.o is None:
         folder = args.logdir
@@ -282,6 +296,7 @@ def train_model(args, train, dev, test, model : LightningWrapper, logdir, fold):
     trainer = L.Trainer(logger=logger, callbacks=[best_callback, es_callback, chkpt_callback], max_epochs=args.epochs,
                         deterministic=True, log_every_n_steps=1,  accumulate_grad_batches=args.accum, strategy=strategy,
                         default_root_dir=logdir)
+    print(trainer.callback_metrics)
     trainer.fit(model, train, dev, ckpt_path=args.checkpoint_path)
     best = torch.load(f'{logdir}/best.ckpt')
     model.load_state_dict(best['state_dict'])
@@ -353,6 +368,8 @@ def create_metrics(ignore_index):
 
     epoch_metrics = MetricCollection({
         'f1' : F1Score(task='binary', ignore_index=ignore_index),
+        'prcurve' : PrecisionRecallCurve('binary', ignore_index=ignore_index),
+        'confusion_matrix' : ConfusionMatrix('binary', ignore_index=ignore_index), 
         'precision' : Precision(task='binary',ignore_index=ignore_index),
         'recall' : Recall(task='binary', ignore_index=ignore_index),
         'auroc' : AUROC('binary', ignore_index=ignore_index),
@@ -409,18 +426,19 @@ def run_training(args : Namespace, create_model_fn):
         train = DataLoader(train_ds, args.batch_size, shuffle=True,
                             collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label,
                                                modify_prob=args.modify_prob, mask_prob=args.mask_prob, rand_prob=args.rand_prob,
-                                               sub_prob=args.sub_prob),
+                                               sub_prob=args.sub_prob, kinases=args.kinase),
                             persistent_workers=True if args.num_workers > 0 else False, 
                             num_workers=args.num_workers )
         
+        dev_collate_fn = partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label, modify_prob=0, kinases=args.kinase)
         # Do not modify input residues when not training
         dev = DataLoader(dev_ds, args.batch_size, shuffle=False,
-                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label, modify_prob=0),
+                            collate_fn=dev_collate_fn,
                             persistent_workers=True if args.num_workers > 0 else False,
                             num_workers=args.num_workers)
         
         test = DataLoader(test_ds, args.batch_size, shuffle=False,
-                            collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label, modify_prob=0),
+                            collate_fn=dev_collate_fn,
                             persistent_workers=True if args.num_workers > 0 else False,
                             num_workers=args.num_workers)
         

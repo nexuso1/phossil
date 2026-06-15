@@ -25,7 +25,7 @@ def labeling_fn(row, residues={'S', 'T', 'Y'}, ignore_index=-1):
 
     return res
 
-def load_prot_data(dataset_path, residues={'S', 'T', 'Y'}, ignore_index=-1):
+def load_prot_data(dataset_path, residues={'S', 'T', 'Y'}, ignore_index=-1, kinases=False):
     """
     Loads the protein dataset and creates label vectors according to the 'sites' column, 
     stored in a new column 'label'. Returns a dataframe with columns 'id', 'sequence' and 'label'
@@ -35,27 +35,10 @@ def load_prot_data(dataset_path, residues={'S', 'T', 'Y'}, ignore_index=-1):
     df['sites'] = df['sites'].apply(lambda x: [int(i) - 1 for i in x])
     labels = df.apply(partial(labeling_fn, residues=residues, ignore_index=ignore_index), axis=1)
     df['label'] = labels
-    
-    return df[['id', 'sequence', 'label']]
+    if kinases:
+        return df[['id', 'sequence', 'label', 'kinase_labels']]
 
-def perturb_seq(seq : str, mode=1, mask_token = '<mask>', mask_prob=0.15):
-    # generate mask probabilites
-    split_seq = seq.split()
-    probs = np.random.rand(len(seq)) < mask_prob
-    # Mask or perturb residue
-    for i, p in enumerate(probs):
-        if p < mask_prob:
-            if mode == 1:
-                split_seq[i] = np.random.randint(0, len(id_to_res))
-            else:
-                t = np.random.rand()
-                if t < 0.3:
-                    split_seq[i] = np.random.randint(0, len(id_to_res))
-                    
-                else:
-                    split_seq[i] = mask_token
-
-    return ''.join(split_seq)
+    return df[['id', 'sequence', 'label', 'kinase_labels']]
 
 def generate_random_residues(num_samples, residue_id_mapping):
     if num_samples == 0:
@@ -150,14 +133,18 @@ def perturb_batch(
 
     return masked_input_ids
 
-def prep_batch(data, tokenizer, modify_prob=0, mask_prob=0.7, rand_prob=0.15, sub_prob=0.15, ignore_label=-1):
+def prep_batch(data, tokenizer, modify_prob=0, mask_prob=0.7, rand_prob=0.15, sub_prob=0.15, ignore_label=-1, kinases=False):
     """
     Collate function for a dataloader. "data" is a list of inputs.
 
     Return a dictionary with keys [input_ids, labels, batch_lens, indices]
     """
     # Indices are for the protein dataframe
-    indices, sequences, labels = zip(*data)
+    if kinases:
+        indices, sequences, labels, kinase_labels = zip(*data)
+    else:
+        indices, sequences, labels = zip(*data)
+        
     batch = tokenizer(sequences, padding='longest', return_tensors="pt")
     sequence_length = batch["input_ids"].shape[1]
 
@@ -174,6 +161,8 @@ def prep_batch(data, tokenizer, modify_prob=0, mask_prob=0.7, rand_prob=0.15, su
     batch['labels'] = torch.as_tensor(batch['labels'], dtype=torch.float32)
     batch['batch_lens'] = torch.as_tensor(np.array([len(x) for x in labels]))
     batch['indices'] = torch.as_tensor(np.array(indices, dtype=np.int32))
+    if kinases:
+        batch['kinase_labels'] = torch.as_tensor(np.asarray([val for lst in kinase_labels for val in lst]), dtype=torch.float32)
 
     return batch
 
@@ -267,14 +256,14 @@ def prepare_datasets(args, ignore_label):
     with open(args.dataset_path, 'r') as f:
         split_info = json.load(f)
     
-    return FullProteinDataset(prot_info, split_info)
+    return FullProteinDataset(prot_info, split_info, kinase=args.kinase)
 
 
 def prepare_full_dataset(args, ignore_label):
-    prot_info = load_prot_data(args.prot_info_path, residues=parse_residues(args.residues), ignore_index=ignore_label)
+    prot_info = load_prot_data(args.prot_info_path, residues=parse_residues(args.residues), ignore_index=ignore_label, kinases=args.kinase)
     with open(args.dataset_path, 'r') as f:
         split_info = json.load(f)
 
     # gets the full dataset
     subset_ds = prot_info.loc[split_info[0]['train'] + split_info[0]['test']]
-    return ProteinDataset(subset_ds)
+    return ProteinDataset(subset_ds, kinase_labels=args.kinase)

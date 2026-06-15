@@ -53,12 +53,18 @@ class EncoderClassifierConfig(TokenClassifierConfig):
 class KinaseClassifierConfig(EncoderClassifierConfig):
     kinase_info_path : str = '../data/kinases_S.csv'
     kinase_emb_path : str = '../data/kinase_embeddings.pt'
-    kinase_transform : bool = False 
-    nl_transform : bool = False # Use non-linear kinase transform
+
+
+
 @dataclass
 class SelectiveFinetuningClassifierConfig(TokenClassifierConfig):
     unfreeze_indices : list[int] = field(default_factory= lambda : [-1])
     dropout_rate = 0
+
+@dataclass
+class KinaseFTClassifierConfig(SelectiveFinetuningClassifierConfig):
+    n_kinases = 389 # Based on the number of kinases in the Kinase-library tool
+    mlp_layers : list[int] = field(default_factory=lambda : [256, 256, 256])
 
 @dataclass
 class RecyclingFinetuningClassifierConfig(TokenClassifierConfig):
@@ -175,55 +181,62 @@ class EncoderClassifier(TokenClassifier):
             x = self.encoder(x,src_key_padding_mask=torch.bitwise_not(enc_mask.bool()))
         return self.classifier(x)[:, 1:], base_out
     
-class KinaseClassifier(EncoderClassifier):
-    def __init__(self, config: KinaseClassifierConfig, base_model: Module) -> None:
+class SelectiveFinetuningClassifier(TokenClassifier):
+    def __init__(self, config: SelectiveFinetuningClassifierConfig, base_model: Module) -> None:
         super().__init__(config, base_model)
-        self.load_kinases()
-        if config.kinase_transform:
-            # Create the kinase transform layer
-            self.kt_layer = torch.nn.Sequential(torch.nn.LazyLinear(self.config.sr_dim))
-            if config.nl_transform:
-                # Add non-linearity with normalization
-                self.kt_layer.append(torch.nn.LayerNorm(self.config.sr_dim))
-                self.kt_layer.append(torch.nn.ReLU())
-                self.kt_layer.append(torch.nn.LazyLinear(self.config.sr_dim))
-        
-        self.pos_embed = SinPositionalEncoding(config.encoder_dim, 1024 + config.sr_n_tokens + self.kinases.shape[0])
+        self.classifier = torch.nn.Linear(base_model.config.hidden_size, config.n_labels)
+        self.init_weights(self.classifier)
+        self.set_base_requires_grad(False)
+        self.set_indexed_layers_grad(config.unfreeze_indices, True)
 
-    def load_kinases(self):
-        kinase_embeds = torch.load(self.config.kinase_emb_path)
-        kinase_info = pd.read_csv(self.config.kinase_info_path)
-        self.kinase_ids = kinase_info['kinase_top1_id'].to_list()
-        with torch.no_grad():
-            kinases = [kinase_embeds[k] for k in self.kinase_ids]
-            # Find the maximum length
-            max_length = max(tensor.size(0) for tensor in kinases)
-            # Pad each tensor to the maximum length
-            padded = [torch.nn.functional.pad(tensor, (0, 0, 0,  max_length - tensor.size(0)), "constant", 0) for tensor in kinases]
-            # Convert list to a single tensor
-            kinases = torch.stack(padded)
+        # Overrides dropout in the unfrozen base model layers
+        self.set_dropout_unfrozen()
         
-        self.register_buffer('kinases', kinases)
+    def set_indexed_layers_grad(self, indices : list[int], req_grad_value : bool):
+        indices = set(indices)
+        self.modified_indices = indices
+        param_list = list(self.base.encoder.layer.named_children())
+        for i in indices:
+            # index 0 contains the name, 1 the parameter
+            for param in param_list[i][1].parameters():
+                param.requires_grad = req_grad_value
+
+    def set_dropout_prob(self, model, prob):
+        """
+        Sets the dropout probability for all dropout layers in a model.
+        """
+        for m in model.modules():
+            if isinstance(m, (torch.nn.Dropout)):
+                m.p = prob
+
+    def set_dropout_unfrozen(self):
+        for i in self.modified_indices:
+            self.set_dropout_prob(self.base.encoder.layer[i], self.config.dropout_rate)
+    
+class KinaseFTClassifier(SelectiveFinetuningClassifier):
+    def __init__(self, config: KinaseFTClassifierConfig, base_model: Module) -> None:
+        super().__init__(config, base_model)
+        self.kinase_head = torch.nn.Sequential(ResidualMLP(
+            input_size=base_model.config.hidden_size,
+            layer_sizes=config.mlp_layers,
+            dropout=config.dropout_rate,
+            norm=torch.nn.LayerNorm,
+            activation=torch.nn.SiLU()),
+            torch.nn.LazyLinear(config.n_kinases)
+        )
+
+    def compute_loss(self, logits, labels, kinase_labels, kinase_logits, attention_mask=None, **kwargs):
+        positive_labels = labels == 1
+        valid_kinase_logits = kinase_logits[positive_labels]
+        kinase_loss = self.loss(valid_kinase_logits.view(-1), kinase_labels.view(-1))
+
+        return kinase_loss + super().compute_loss(logits, labels, attention_mask=attention_mask)
         
     def forward(self, input_ids, attention_mask, **kwargs):
         base_out = self.base(input_ids=input_ids, attention_mask=attention_mask)
-        x = base_out[0]
-        proj = self.res_cnn(x)
-
-        seq_rep = self.seq_rep(x).unsqueeze(1) # B, 1, CH
-        kinase_reps = self.seq_rep(self.kinases).unsqueeze(0) # 1, N_kinases, CH
-        kinase_reps = kinase_reps.expand(seq_rep.size(0), -1, seq_rep.size(-1)) # B, N_kinases, CH
-        if self.config.kinase_transform:
-            kinase_reps = self.kt_layer(kinase_reps)
-        reps = torch.cat([kinase_reps, seq_rep], axis=1) # B, N_kinases + 1, CH
-        enc_mask = torch.cat([torch.ones(attention_mask.shape[0], reps.shape[1], device=self.device), attention_mask], 1)
-        x = torch.cat([reps, proj], axis=1)
-        x = x + self.pos_embed(x)
-
-        # src_key_padding_mask contains True if token i is padding, otherwise False
-        x = self.encoder(x, src_key_padding_mask=torch.bitwise_not(enc_mask.bool()))
-        
-        return self.classifier(x)[:, reps.shape[1]:], base_out
+        kinase_logits = self.kinase_head(base_out[0])
+        base_out['kinase_logits'] = kinase_logits
+        return self.classifier(base_out[0]), base_out
 
 class UniPTM(TokenClassifier):
     def __init__(self, config, base, emb_size, num_heads, num_layers, hidden_size, dropout_rate, pos_weight=None):
@@ -356,37 +369,7 @@ class BaselineClassifier(TokenClassifier):
         self.base.eval()
         return super().forward(input_ids, attention_mask, **kwargs)
 
-class SelectiveFinetuningClassifier(TokenClassifier):
-    def __init__(self, config: SelectiveFinetuningClassifierConfig, base_model: Module) -> None:
-        super().__init__(config, base_model)
-        self.classifier = torch.nn.Linear(base_model.config.hidden_size, config.n_labels)
-        self.init_weights(self.classifier)
-        self.set_base_requires_grad(False)
-        self.set_indexed_layers_grad(config.unfreeze_indices, True)
 
-        # Overrides dropout in the unfrozen base model layers
-        self.set_dropout_unfrozen()
-        
-    def set_indexed_layers_grad(self, indices : list[int], req_grad_value : bool):
-        indices = set(indices)
-        self.modified_indices = indices
-        param_list = list(self.base.encoder.layer.named_children())
-        for i in indices:
-            # index 0 contains the name, 1 the parameter
-            for param in param_list[i][1].parameters():
-                param.requires_grad = req_grad_value
-
-    def set_dropout_prob(self, model, prob):
-        """
-        Sets the dropout probability for all dropout layers in a model.
-        """
-        for m in model.modules():
-            if isinstance(m, (torch.nn.Dropout)):
-                m.p = prob
-
-    def set_dropout_unfrozen(self):
-        for i in self.modified_indices:
-            self.set_dropout_prob(self.base.encoder.layer[i], self.config.dropout_rate)
 
 class LMFinetuningClassifier(LMModel):
     def __init__(self, config: SelectiveFinetuningClassifierConfig, base_model: Module) -> None:
