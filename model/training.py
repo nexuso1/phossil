@@ -109,11 +109,11 @@ class LightningWrapper(L.LightningModule):
     def training_step(self, batch, batch_idx):
         loss, logits, outputs = self.classifier.train_predict(**batch)
         self.log('train_loss', loss, logger=True, prog_bar=True, sync_dist=True)
-        self._compute_metrics_step(logits.reshape(-1, 1), batch['labels'].view(-1, 1),
+        self._compute_metrics_step(logits.view(-1), batch['labels'].view(-1),
                                    self.train_step_metrics, self.train_epoch_metrics)
         
         if self.predicting_kinases:
-            self._compute_metrics_step(outputs['kinase_logits'][batch['labels'] == 1].view(-1, 1), batch['kinase_labels'].view(-1, 1),
+            self._compute_metrics_step(outputs['kinase_logits'][batch['labels'] == 1].view(-1), batch['kinase_labels'].view(-1),
                                        self.train_kinase_step_metrics, self.train_kinase_epoch_metrics)
         
         if self.debug:
@@ -130,7 +130,7 @@ class LightningWrapper(L.LightningModule):
     def _eval_step(self, batch, batch_idx, type : str):
         loss, logits, outputs = self.classifier.predict(**batch)
         self.log(f'{type}_loss', loss, logger=True, prog_bar=True, sync_dist=True)
-        self._compute_metrics_step(logits.reshape(-1, 1), batch['labels'].view(-1, 1), 
+        self._compute_metrics_step(logits.view(-1), batch['labels'].view(-1), 
                                    self.__getattr__(f'{type}_step_metrics'), self.__getattr__(f'{type}_epoch_metrics'))
         
         if self.predicting_kinases:
@@ -145,6 +145,10 @@ class LightningWrapper(L.LightningModule):
     def test_step(self, batch, batch_idx):
         loss, logits, outputs = self._eval_step(batch, batch_idx, 'test')
 
+        self.optimum_metrics.update(logits.view(-1), batch['labels'].view(-1))
+        if self.predicting_kinases:
+            self.optimum_kinase_metrics.update(outputs['kinase_logits'][batch['labels'] == 1].view(-1), batch['kinase_labels'].view(-1))
+
         # Relevant positions mask
         mask = batch['labels'] != -1
         # Save test predictions
@@ -157,6 +161,36 @@ class LightningWrapper(L.LightningModule):
                 preds = preds + (outputs['kinase_logits'][i][mask[i]].cpu().numpy(),)
 
             self.test_preds.append(preds) # index into the test set
+
+    def _shared_epoch_start(self, type):
+
+        # Make sure all metrics are reset
+        for m_type in ['step','epoch']:
+            self.__getattr__(f'{type}_{m_type}_metrics').reset()
+
+            if self.predicting_kinases:
+                self.__getattr__(f'{type}_kinase_{m_type}_metrics').reset()
+
+    def on_validation_epoch_start(self):
+        self._shared_epoch_start('val')
+
+    def on_test_epoch_start(self):
+        self.optimum_metrics = MetricCollection({
+                'optimum_f1' : F1Score('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
+                'optimum_recall' : Recall('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
+                'optimum_precision' : Precision('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
+                'optimum_mcc' : MatthewsCorrCoef('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
+                'optimum_confusion_matrix' : ConfusionMatrix('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
+            }
+        ).to(device=self.device)
+    
+        if self.predicting_kinases:
+            self.optimum_kinase_metrics = self.optimum_metrics.clone('kinase_')
+        
+        self._shared_epoch_start('test')
+
+    def on_train_epoch_start(self):
+        self._shared_epoch_start('train')
 
     def on_train_epoch_end(self) -> None:
         self.train_epoch_metrics.compute()
@@ -186,22 +220,57 @@ class LightningWrapper(L.LightningModule):
                 im,
                 global_step=self.current_epoch,
             )
-            epoch_metrics[metric].reset()
             plt.close(fig=fig)
 
+
+    def find_optimal_threhsold(self):
+        precision, recall, thresholds = self.val_epoch_metrics['val_prcurve'].compute()
+        # Slice precision and recall to match the exact size of the thresholds tensor
+        precision_bound = precision[:len(thresholds)]
+        recall_bound = recall[:len(thresholds)]
+
+        f1_scores = (2 * precision_bound * recall_bound) / (precision_bound + recall_bound + 1e-10)
+        best_idx = torch.argmax(f1_scores)
+
+        optimal_threshold = thresholds[best_idx]
+        self.optimal_threshold = float(optimal_threshold.cpu())
+        self.optimal_dev_metric_values = {
+            'f1' : torch.max(f1_scores).cpu().numpy(),
+            'precision' : float(precision_bound[best_idx].cpu()),
+            'recall' : float(recall_bound[best_idx].cpu())
+        }
+
+        if self.predicting_kinases:
+            precision, recall, thresholds = self.val_kinase_epoch_metrics['val_kinase_prcurve'].compute()
+            precision_bound = precision[:len(thresholds)]
+            recall_bound = recall[:len(thresholds)]
+
+            f1_scores = (2 * precision_bound * recall_bound) / (precision_bound + recall_bound + 1e-10)
+            best_idx = torch.argmax(f1_scores)
+
+            self.optimal_kinase_threshold = thresholds[best_idx]
+            self.optimal_kinase_dev_metric_values = {
+                'f1' : torch.max(f1_scores).cpu().numpy(),
+                'precision' : precision_bound[best_idx],
+                'recall' : recall_bound[best_idx]
+            }
+    
     def _shared_epoch_end(self, mode):
         epoch_metrics = self.__getattr__(f'{mode}_epoch_metrics')
         self._log_epoch_metrics(epoch_metrics)
 
     def on_validation_epoch_end(self) -> None:
+        self.find_optimal_threhsold()
         self._shared_epoch_end('val')
         if self.predicting_kinases:
             self._shared_epoch_end('val_kinase')
         
     def on_test_epoch_end(self):
         self._shared_epoch_end('test')
+        self._log_epoch_metrics(self.optimum_metrics)
         if self.predicting_kinases:
             self._shared_epoch_end('test_kinase')
+            self._log_epoch_metrics(self.optimum_kinase_metrics)
 
     def get_parameter_names(self, model : torch.nn.Module, forbidden_layer_types):
         """
@@ -341,6 +410,18 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
     pred_df = pd.DataFrame.from_records(training_model.test_preds, columns=columns)
     pred_df.to_json(f"{logdir}/test_preds_fold_{fold}.json")
     print(test_metrics)
+    print(f'Optimal prediction threshold (from validation data): {training_model.optimal_threshold}')
+    
+    test_metrics[0]['optimal_dev_pred_threshold'] = training_model.optimal_threshold
+    for k, metric in training_model.optimal_dev_metric_values.items():
+        test_metrics[0][f'dev_{k}'] = metric
+
+    if args.kinase:
+        print(f'Optimal kinase prediction threshold (from validation data): {training_model.optimal_kinase_threshold}')
+        for k, metric in training_model.optimal_kinase_dev_metric_values.items():
+            test_metrics[0][f'dev_kinase_{k}'] = metric
+        test_metrics[0]['optimal_dev_kinase_pred_threshold'] = training_model.optimal_threshold
+
 
     return model, test_metrics
 
