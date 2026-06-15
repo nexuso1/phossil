@@ -225,6 +225,8 @@ class KinaseFTClassifier(SelectiveFinetuningClassifier):
             torch.nn.LazyLinear(config.n_kinases)
         )
 
+        self.init_weights(self.kinase_head)
+
     def compute_loss(self, logits, labels, kinase_labels, kinase_logits, attention_mask=None, **kwargs):
         positive_labels = labels == 1
         valid_kinase_logits = kinase_logits[positive_labels]

@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import lora
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 @dataclass
@@ -13,6 +13,7 @@ class TokenClassifierConfig:
     n_labels : int
     loss : Callable[[torch.Tensor], torch.Tensor]
     lora_config : lora.MultiPurposeLoRAConfig | None = None
+    unfreeze_indices : list[int] = field(default_factory=lambda : [])
     apply_lora : bool = False
     dropout_rate : float = 0
     base_type : str = '650M' # Type of the ESM base model, currently (650M, 13B, 35M)
@@ -69,9 +70,6 @@ class TokenClassifier(nn.Module):
 
         print('LoRA applied.')
     
-    def collapse_prevention_loss(self, logits, min_std=0.1, mult=10):
-        std = torch.nn.std(logits)
-        
     def init_weights(self, module):
         for param in module.parameters():
             self.xavier_init(param)
@@ -103,6 +101,27 @@ class TokenClassifier(nn.Module):
         Meant to be overriden for specific classifier implementations
         """
         return inputs
+    
+    def set_indexed_layers_grad(self, indices : list[int], req_grad_value : bool):
+        indices = set(indices)
+        self.modified_indices = indices
+        param_list = list(self.base.encoder.layer.named_children())
+        for i in indices:
+            # index 0 contains the name, 1 the parameter
+            for param in param_list[i][1].parameters():
+                param.requires_grad = req_grad_value
+
+    def set_dropout_prob(self, model, prob):
+        """
+        Sets the dropout probability for all dropout layers in a model.
+        """
+        for m in model.modules():
+            if isinstance(m, (torch.nn.Dropout)):
+                m.p = prob
+
+    def set_dropout_unfrozen(self):
+        for i in self.modified_indices:
+            self.set_dropout_prob(self.base.encoder.layer[i], self.config.dropout_rate)
 
     def set_base_requires_grad(self, requires_grad : bool):
         """
@@ -110,6 +129,14 @@ class TokenClassifier(nn.Module):
         """
         for p in self.base.parameters():
           p.requires_grad = requires_grad
+
+    def freeze_phase(self):
+        self.set_base_requires_grad(False)
+        self.set_dropout_prob(self.base, 0)
+
+    def unfreeze_phase(self):
+        self.set_indexed_layers_grad(self.config.unfreeze_indices, True)
+        self.set_dropout_unfrozen()
 
     def predict(self, input_ids, attention_mask=None, return_dict=False, labels=None, **kwargs) -> torch.Tensor:
         """

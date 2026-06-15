@@ -32,7 +32,7 @@ parser = ArgumentParser()
 parser.add_argument('--seed', type=int, help='Random seed', default=42)
 parser.add_argument('--batch_size', type=int, help='Batch size)', default=4)
 parser.add_argument('--epochs', type=int, help='Number of training epochs', default=20)
-parser.add_argument('--frozen_epochs', type=int, help='Number of training epochs with the base model frozen')
+parser.add_argument('--frozen_epochs', type=int, default=0, help='Number of training epochs with the base model frozen')
 parser.add_argument('--prot_info_path', type=str, 
                      help='Path to the protein dataset. Expects a dataframe with columns ("id", "sequence", "sites"). "sequence" is the protein AA string, "sites" is a list of phosphorylation sites.',
                      default='../data/phosphosite_sequences/phosphosite_df.json')
@@ -41,6 +41,7 @@ parser.add_argument('--weight_decay', type=float, help='Weight decay', default=1
 parser.add_argument('--accum', type=int, help='Number of gradient accumulation steps', default=3)
 parser.add_argument('--hidden_size', type=int, help='Classifier hidden size', default=128)
 parser.add_argument('--lr', type=float, help='Learning rate', default=3e-4)
+parser.add_argument('--frozen_lr', type=float, help='Frozen phase starting learning rate', default=1e-3)
 parser.add_argument('-o', type=str, help='Output folder', default=None)
 parser.add_argument('-n', type=str, help='Model name', default='esm')
 parser.add_argument('--compile', action='store_true', default=False, help='Compile the model')
@@ -67,18 +68,21 @@ parser.add_argument('--sub_prob', help='Relative probability of substituting inp
                      default=0.15, type=float)
 parser.add_argument('--fix_decay', action='store_true', help="Do not apply weight decay to bias and layer norm parameters.")
 parser.add_argument('--kinase', action='store_true', help='Use kinase labels in prediction')
+parser.add_argument('--unfreeze_indices', type=str, default="[]", help="Indices of base model layers to unfreeze")
 parser.add_argument('--fold', type=int, default=None, help='Train only this fold index. Leave None for default all-fold training')
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class LightningWrapper(L.LightningModule):
     def __init__(self, args, module : TokenClassifier, epoch_metrics : MetricCollection,
-                 step_metrics : MetricCollection, ds_size : int, logdir : str):
+                 step_metrics : MetricCollection, ds_size : int, logdir : str, train_epochs, lr):
         super(LightningWrapper, self).__init__()
         self.classifier = module
         self.ds_size = ds_size
+        self.train_epochs = train_epochs
         self.logdir = logdir
         self.predicting_kinases = args.kinase
+        self.lr = lr
 
         for prefix in ['train_', 'val_', 'test_']:
             for kind, metrics in zip(['epoch', 'step'], [epoch_metrics, step_metrics]):
@@ -130,7 +134,7 @@ class LightningWrapper(L.LightningModule):
                                    self.__getattr__(f'{type}_step_metrics'), self.__getattr__(f'{type}_epoch_metrics'))
         
         if self.predicting_kinases:
-            self._compute_metrics_step(outputs['kinase_logits'][batch['labels'] == 1].reshape(-1, 1), batch['kinase_labels'].view(-1, 1),
+            self._compute_metrics_step(outputs['kinase_logits'][batch['labels'] == 1].view(-1), batch['kinase_labels'].view(-1),
                                        self.__getattr__(f'{type}_kinase_step_metrics'), self.__getattr__(f'{type}_kinase_epoch_metrics'))
             
         return loss, logits, outputs
@@ -150,7 +154,7 @@ class LightningWrapper(L.LightningModule):
                                     (torch.nonzero(mask[i] ) - 1).cpu().numpy().reshape(-1), # sequence indices (0-based) of relevant positions
                                     int(batch['indices'][i].cpu().numpy()))
             if self.predicting_kinases:
-                preds = preds + (outputs['kinase_logits'])
+                preds = preds + (outputs['kinase_logits'][i][mask[i]].cpu().numpy(),)
 
             self.test_preds.append(preds) # index into the test set
 
@@ -187,7 +191,6 @@ class LightningWrapper(L.LightningModule):
 
     def _shared_epoch_end(self, mode):
         epoch_metrics = self.__getattr__(f'{mode}_epoch_metrics')
-        step_metrics = self.__getattr__(f'{mode}_step_metrics')
         self._log_epoch_metrics(epoch_metrics)
 
     def on_validation_epoch_end(self) -> None:
@@ -223,7 +226,7 @@ class LightningWrapper(L.LightningModule):
         optimizer_kwargs = {
                 "betas": (0.9, 0.98),
                 "eps": 1e-8,
-                'lr' : self.hparams.lr,
+                'lr' : self.lr,
             }
         if self.hparams.fix_decay:
             decay_parameters = self.get_parameter_names(self.classifier, [torch.nn.LayerNorm])
@@ -247,7 +250,7 @@ class LightningWrapper(L.LightningModule):
             # Needed for UniPTM training
             schedule = torch.optim.lr_scheduler.StepLR(optim, step_size=20, gamma=0.92)
         else:
-            schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=self.hparams.epochs)
+            schedule = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=self.train_epochs)
         return {'optimizer' : optim, 'lr_scheduler' : { 
             "scheduler" : schedule,
             "interval": "epoch",
@@ -278,32 +281,64 @@ def create_loss(args):
     
     return torch.nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([args.pos_weight]))
     
-def train_model(args, train, dev, test, model : LightningWrapper, logdir, fold):
-    logger = TensorBoardLogger(logdir, name=f'tb_log')
+def create_callbacks(logdir, patience):
 
     # Best model checkpoint
     best_callback = ModelCheckpoint(logdir, filename='best', monitor='val_f1', mode='max',
                                       save_on_train_epoch_end=1, auto_insert_metric_name=True)
     # Training checkpoint (because having a defined ModelCheckpoint overrides the default checkpointing)
     chkpt_callback = ModelCheckpoint(logdir, filename='chkpt')
-    es_callback = EarlyStopping('val_f1', patience=args.patience, mode="max")
+    es_callback = EarlyStopping('val_f1', patience=patience, mode="max")
+    return [best_callback, chkpt_callback, es_callback]
+
+def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, metadata : Metadata,
+                master_logdir):
+    step_metrics, epoch_metrics = create_metrics(args.ignore_label)
+
+    logger = TensorBoardLogger(logdir, name=f'tb_log')
 
     # Use deepspeed 
     if torch.cuda.device_count() > 1:
         strategy = "deepspeed_stage_2"
     else:
         strategy = "auto"
-    trainer = L.Trainer(logger=logger, callbacks=[best_callback, es_callback, chkpt_callback], max_epochs=args.epochs,
+    callbacks = create_callbacks(logdir, patience=args.patience)
+
+    # Frozen training
+    if args.frozen_epochs > 0 and not metadata.data.get('frozen_finished', True):
+        print('Frozen phase training')
+        model.freeze_phase()
+        if not isinstance(model, LightningWrapper):
+            training_model = LightningWrapper(args, model, step_metrics=step_metrics, epoch_metrics=epoch_metrics, ds_size=len(train), logdir=logdir,
+                                    train_epochs=args.frozen_epochs, lr=args.frozen_lr)
+        trainer = L.Trainer(logger=logger, callbacks=callbacks, max_epochs=args.frozen_epochs,
+                            deterministic=True, log_every_n_steps=1,  accumulate_grad_batches=args.accum, strategy=strategy,
+                            default_root_dir=logdir)
+
+        trainer.fit(training_model, train, dev, ckpt_path=args.checkpoint_path)
+        metadata.data['frozen_finished'] = True
+        metadata.save(master_logdir)
+
+    print('Unfrozen phase training')
+    # Unfrozen training
+    trainer = L.Trainer(logger=logger, callbacks=callbacks, max_epochs=args.epochs,
                         deterministic=True, log_every_n_steps=1,  accumulate_grad_batches=args.accum, strategy=strategy,
                         default_root_dir=logdir)
-    print(trainer.callback_metrics)
-    trainer.fit(model, train, dev, ckpt_path=args.checkpoint_path)
+    model.unfreeze_phase()
+    if not isinstance(model, LightningWrapper):
+        training_model = LightningWrapper(args, model, step_metrics=step_metrics, epoch_metrics=epoch_metrics, ds_size=len(train), logdir=logdir,
+                                train_epochs=args.epochs, lr=args.lr)
+    trainer.fit(training_model, train, dev, ckpt_path=args.checkpoint_path)
     best = torch.load(f'{logdir}/best.ckpt')
-    model.load_state_dict(best['state_dict'])
-    test_metrics = trainer.test(model, test)
+    training_model.load_state_dict(best['state_dict'])
+    test_metrics = trainer.test(training_model, test)
 
     # Save predictions into a DataFrame
-    pred_df = pd.DataFrame.from_records(model.test_preds, columns=['logits', 'labels', 'sequence_indices', 'df_index'])
+    columns = ['logits', 'labels', 'sequence_indices', 'df_index']
+    if args.kinase:
+        columns += ['kinase_logits']
+
+    pred_df = pd.DataFrame.from_records(training_model.test_preds, columns=columns)
     pred_df.to_json(f"{logdir}/test_preds_fold_{fold}.json")
     print(test_metrics)
 
@@ -334,6 +369,7 @@ def handle_metadata(args, n_folds=5):
         meta.data = {'args' : args }
         meta.data['current_fold'] = 0
         meta.data['test_metrics'] = [{} for _ in range(n_folds)]
+        meta.data['frozen_finished'] = False
         meta.save(args.logdir)
     else:
         # Parse info from the metadata file
@@ -406,7 +442,7 @@ def run_training(args : Namespace, create_model_fn):
 
     log_dirname = args.o if args.o else "{}_{}".format(
             os.path.basename(globals().get("__file__", "notebook")),
-            datetime.datetime.now().strftime("%Y_%m_%d_%H%M%S"),
+            datetime.datetime.now().strftime("%Y_%m_%d_%H%M"),
         )
 
     args.logdir = os.path.join("new_logs", log_dirname)
@@ -414,7 +450,7 @@ def run_training(args : Namespace, create_model_fn):
     meta = handle_metadata(args)
     tokenizer = get_tokenizer(args)
     full_dataset = prepare_datasets(args, ignore_label=args.ignore_label)
-    step_metrics, epoch_metrics = create_metrics(args.ignore_label)
+
 
     master_logdir = args.logdir
 
@@ -445,18 +481,8 @@ def run_training(args : Namespace, create_model_fn):
         model, tokenizer = prepare_model(args, create_model_fn)
 
         logdir = os.path.join(master_logdir, f'fold_{fold}')
-        if not isinstance(model, LightningWrapper):
-            model = LightningWrapper(args, model, step_metrics=step_metrics, epoch_metrics=epoch_metrics, ds_size=len(train), logdir=logdir)
-
-        if args.compile:
-            # Compile the model, useful in general on Ampere architectures and further
-            compiled_model = torch.compile(model)
-            compiled_model.to(device) # We cannot save the compiled model, but it shares weights with the original, so we save that instead
-            training_model = compiled_model
-        else:
-            training_model = model.to(device)
-    
-        training_model, test_metrics = train_model(args, train, dev, test, training_model, logdir, fold=fold)
+        model, test_metrics = train_model(args, train, dev, test, model, logdir, fold=fold,
+                                                   metadata=meta, master_logdir=master_logdir)
         meta.data['test_metrics'][fold]= test_metrics[0]
 
         print(f'Test metrics for fold {fold}')
