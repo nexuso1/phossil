@@ -391,7 +391,7 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
  
 
     # Frozen training
-    if args.frozen_epochs > 0 and not metadata.data['frozen_finished']:
+    if args.frozen_epochs > 0 and not metadata.data['frozen_finished'][fold]:
         callbacks = create_callbacks(logdir, patience=args.patience, suffix='_frozen')
         print('Frozen phase training')
         model.freeze_phase()
@@ -403,11 +403,11 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
                             default_root_dir=logdir, num_sanity_val_steps=0)
 
         trainer.fit(training_model, train, dev, ckpt_path=args.checkpoint_path)
-        metadata.data['frozen_finished'] = True
-        metadata.save(master_logdir)
         best = torch.load(f'{logdir}/best_frozen.ckpt')
         training_model.load_state_dict(best['state_dict'])
         model = training_model.classifier
+        metadata.data['frozen_finished'][fold] = True
+        metadata.save(master_logdir)
 
     print('Unfrozen phase training')
     callbacks = create_callbacks(logdir, patience=args.patience)
@@ -444,10 +444,6 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
     #         test_metrics[0][f'dev_kinase_{k}'] = metric
     #     test_metrics[0]['optimal_dev_kinase_pred_threshold'] = training_model.optimal_threshold
 
-    # reset frozen flag
-    metadata.data['frozen_finished'] = False
-    metadata.save(master_logdir)
-
     return model, test_metrics
 
 def get_tokenizer(args):
@@ -475,7 +471,7 @@ def handle_metadata(args, n_folds=5):
         meta.data = {'args' : args }
         meta.data['current_fold'] = 0
         meta.data['test_metrics'] = [{} for _ in range(n_folds)]
-        meta.data['frozen_finished'] = False
+        meta.data['frozen_finished'] = [False for _ in range(n_folds)]
         meta.save(args.logdir)
     else:
         # Parse info from the metadata file
@@ -605,8 +601,8 @@ def run_training(args : Namespace, create_model_fn):
             # Clear the checkpoint after resuming
             args.checkpoint_path = None
         meta.save(master_logdir)
-
-    compute_averages(meta)
+    if args.fold is None:
+        compute_averages(meta)
     meta.save(master_logdir)
     return model
 
