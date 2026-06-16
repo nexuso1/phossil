@@ -367,11 +367,11 @@ def create_loss(args):
 def create_callbacks(logdir, patience):
 
     # Best model checkpoint
-    best_callback = ModelCheckpoint(logdir, filename='best', monitor='val_f1', mode='max',
+    best_callback = ModelCheckpoint(logdir, filename='best', monitor='val_mcc', mode='max',
                                       save_on_train_epoch_end=1, auto_insert_metric_name=True)
     # Training checkpoint (because having a defined ModelCheckpoint overrides the default checkpointing)
     chkpt_callback = ModelCheckpoint(logdir, filename='chkpt')
-    es_callback = EarlyStopping('val_f1', patience=patience, mode="max")
+    es_callback = EarlyStopping('val_mcc', patience=patience, mode="max")
     return [best_callback, chkpt_callback, es_callback]
 
 def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, metadata : Metadata,
