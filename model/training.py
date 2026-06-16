@@ -94,12 +94,12 @@ class LightningWrapper(L.LightningModule):
         
         self.loss_metric = MeanMetric()
         self.test_preds = []
-        self.optimal_threshold = 0
-        self.optimal_dev_metric_values = {
-            'f1' : 0,
-            'precision' : 0,
-            'recall' : 0
-        }
+        # self.optimal_threshold = 0
+        # self.optimal_dev_metric_values = {
+        #     'f1' : 0,
+        #     'precision' : 0,
+        #     'recall' : 0
+        # }
         self.debug = False
         if hasattr(args, "debug") and args.debug:
             self.debug = True
@@ -152,9 +152,9 @@ class LightningWrapper(L.LightningModule):
     def test_step(self, batch, batch_idx):
         loss, logits, outputs = self._eval_step(batch, batch_idx, 'test')
 
-        self.optimum_metrics.update(logits.view(-1), batch['labels'].view(-1))
-        if self.predicting_kinases:
-            self.optimum_kinase_metrics.update(outputs['kinase_logits'][batch['labels'] == 1].view(-1), batch['kinase_labels'].view(-1))
+        #self.optimum_metrics.update(logits.view(-1), batch['labels'].view(-1))
+        # if self.predicting_kinases:
+        #     self.optimum_kinase_metrics.update(outputs['kinase_logits'][batch['labels'] == 1].view(-1), batch['kinase_labels'].view(-1))
 
         # Relevant positions mask
         mask = batch['labels'] != -1
@@ -182,17 +182,17 @@ class LightningWrapper(L.LightningModule):
         self._shared_epoch_start('val')
 
     def on_test_epoch_start(self):
-        self.optimum_metrics = MetricCollection({
-                'optimum_f1' : F1Score('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
-                'optimum_recall' : Recall('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
-                'optimum_precision' : Precision('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
-                'optimum_mcc' : MatthewsCorrCoef('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
-                'optimum_confusion_matrix' : ConfusionMatrix('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
-            }
-        ).to(device=self.device)
+        # self.optimum_metrics = MetricCollection({
+        #         'optimum_f1' : F1Score('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
+        #         'optimum_recall' : Recall('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
+        #         'optimum_precision' : Precision('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
+        #         'optimum_mcc' : MatthewsCorrCoef('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
+        #         'optimum_confusion_matrix' : ConfusionMatrix('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
+        #     }
+        # ).to(device=self.device)
     
-        if self.predicting_kinases:
-            self.optimum_kinase_metrics = self.optimum_metrics.clone('kinase_')
+        # if self.predicting_kinases:
+        #     self.optimum_kinase_metrics = self.optimum_metrics.clone('kinase_')
         
         self._shared_epoch_start('test')
 
@@ -277,17 +277,17 @@ class LightningWrapper(L.LightningModule):
             self._shared_epoch_end('train_kinase', save_image=False)
 
     def on_validation_epoch_end(self) -> None:
-        self.find_optimal_threhsold()
+        # self.find_optimal_threhsold()
         self._shared_epoch_end('val')
         if self.predicting_kinases:
             self._shared_epoch_end('val_kinase')
         
     def on_test_epoch_end(self):
         self._shared_epoch_end('test')
-        self._log_epoch_metrics(self.optimum_metrics)
+        #self._log_epoch_metrics(self.optimum_metrics)
         if self.predicting_kinases:
             self._shared_epoch_end('test_kinase')
-            self._log_epoch_metrics(self.optimum_kinase_metrics)
+            #self._log_epoch_metrics(self.optimum_kinase_metrics)
 
     def get_parameter_names(self, model : torch.nn.Module, forbidden_layer_types):
         """
@@ -367,13 +367,13 @@ def create_loss(args):
     
     return torch.nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([args.pos_weight]))
     
-def create_callbacks(logdir, patience):
+def create_callbacks(logdir, patience, suffix=''):
 
     # Best model checkpoint
-    best_callback = ModelCheckpoint(logdir, filename='best', monitor='val_mcc', mode='max',
+    best_callback = ModelCheckpoint(logdir, filename=f'best{suffix}', monitor='val_mcc', mode='max',
                                       save_on_train_epoch_end=1, auto_insert_metric_name=True)
     # Training checkpoint (because having a defined ModelCheckpoint overrides the default checkpointing)
-    chkpt_callback = ModelCheckpoint(logdir, filename='chkpt')
+    chkpt_callback = ModelCheckpoint(logdir, filename=f'chkpt{suffix}')
     es_callback = EarlyStopping('val_mcc', patience=patience, mode="max")
     return [best_callback, chkpt_callback, es_callback]
 
@@ -388,10 +388,11 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
         strategy = "deepspeed_stage_2"
     else:
         strategy = "auto"
-    callbacks = create_callbacks(logdir, patience=args.patience)
+ 
 
     # Frozen training
-    if args.frozen_epochs > 0 and not metadata.data.get('frozen_finished', True):
+    if args.frozen_epochs > 0 and not metadata.data['frozen_finished']:
+        callbacks = create_callbacks(logdir, patience=args.patience, suffix='_frozen')
         print('Frozen phase training')
         model.freeze_phase()
         if not isinstance(model, LightningWrapper):
@@ -404,12 +405,12 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
         trainer.fit(training_model, train, dev, ckpt_path=args.checkpoint_path)
         metadata.data['frozen_finished'] = True
         metadata.save(master_logdir)
-        best = torch.load(f'{logdir}/best.ckpt')
+        best = torch.load(f'{logdir}/best_frozen.ckpt')
         training_model.load_state_dict(best['state_dict'])
         model = training_model.classifier
 
-
     print('Unfrozen phase training')
+    callbacks = create_callbacks(logdir, patience=args.patience)
     # Unfrozen training
     trainer = L.Trainer(logger=logger, callbacks=callbacks, max_epochs=args.epochs,
                         deterministic=True, log_every_n_steps=1,  accumulate_grad_batches=args.accum, strategy=strategy,
@@ -431,17 +432,17 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
     pred_df = pd.DataFrame.from_records(training_model.test_preds, columns=columns)
     pred_df.to_json(f"{logdir}/test_preds_fold_{fold}.json")
     print(test_metrics)
-    print(f'Optimal prediction threshold (from validation data): {training_model.optimal_threshold}')
+    # print(f'Optimal prediction threshold (from validation data): {training_model.optimal_threshold}')
     
-    test_metrics[0]['optimal_dev_pred_threshold'] = training_model.optimal_threshold
-    for k, metric in training_model.optimal_dev_metric_values.items():
-        test_metrics[0][f'dev_{k}'] = metric
+    # test_metrics[0]['optimal_dev_pred_threshold'] = training_model.optimal_threshold
+    # for k, metric in training_model.optimal_dev_metric_values.items():
+    #     test_metrics[0][f'dev_{k}'] = metric
 
-    if args.kinase:
-        print(f'Optimal kinase prediction threshold (from validation data): {training_model.optimal_kinase_threshold}')
-        for k, metric in training_model.optimal_kinase_dev_metric_values.items():
-            test_metrics[0][f'dev_kinase_{k}'] = metric
-        test_metrics[0]['optimal_dev_kinase_pred_threshold'] = training_model.optimal_threshold
+    # if args.kinase:
+    #     print(f'Optimal kinase prediction threshold (from validation data): {training_model.optimal_kinase_threshold}')
+    #     for k, metric in training_model.optimal_kinase_dev_metric_values.items():
+    #         test_metrics[0][f'dev_kinase_{k}'] = metric
+    #     test_metrics[0]['optimal_dev_kinase_pred_threshold'] = training_model.optimal_threshold
 
     # reset frozen flag
     metadata.data['frozen_finished'] = False
