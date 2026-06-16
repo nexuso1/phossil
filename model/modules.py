@@ -323,7 +323,7 @@ class FusedMBConv1D(torch.nn.Module):
         return x.moveaxis(1, -1)
 
 class ResidualTransformerLayer(torch.nn.Module):
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activ=torch.nn.SiLU):
         super().__init__()
         self.self_attn = torch.nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
         
@@ -337,7 +337,8 @@ class ResidualTransformerLayer(torch.nn.Module):
         self.norm2 = torch.nn.LayerNorm(d_model)
         self.dropout1 = torch.nn.Dropout(dropout)
         self.dropout2 = torch.nn.Dropout(dropout)
-
+        self.activ = activ()
+        
     def forward(self, x, mask=None):
         # 1. Multi-head Attention + Residual (Pre-LN style)
         # We normalize BEFORE the sub-layer and add the result back to the original input
@@ -356,7 +357,7 @@ class ResidualTransformerLayer(torch.nn.Module):
         # 2. Feedforward + Residual (Pre-LN style)
         residual = x
         x = self.norm2(x)
-        ff_output = self.linear2(self.dropout(torch.relu(self.linear1(x))))
+        ff_output = self.linear2(self.dropout(self.activ(self.linear1(x))))
         x = residual + self.dropout2(ff_output)
         
         return x

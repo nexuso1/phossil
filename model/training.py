@@ -244,7 +244,7 @@ class LightningWrapper(L.LightningModule):
         self.optimal_threshold = float(optimal_threshold.cpu())
         
         self.optimal_dev_metric_values = {
-            'f1' : torch.max(f1_scores).cpu().numpy(),
+            'f1' : float(torch.max(f1_scores).cpu().numpy()),
             'precision' : float(precision_bound[best_idx].cpu()),
             'recall' : float(recall_bound[best_idx].cpu())
         }
@@ -259,9 +259,9 @@ class LightningWrapper(L.LightningModule):
 
             self.optimal_kinase_threshold = thresholds[best_idx]
             self.optimal_kinase_dev_metric_values = {
-                'f1' : torch.max(f1_scores).cpu().numpy(),
-                'precision' : precision_bound[best_idx],
-                'recall' : recall_bound[best_idx]
+                'f1' : float(torch.max(f1_scores).cpu().numpy()),
+                'precision' : float(precision_bound[best_idx].cpu()),
+                'recall' : float(recall_bound[best_idx].cpu())
             }
     
     def _shared_epoch_end(self, mode, save_image=True):
