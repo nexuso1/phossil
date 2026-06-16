@@ -443,7 +443,10 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
             test_metrics[0][f'dev_kinase_{k}'] = metric
         test_metrics[0]['optimal_dev_kinase_pred_threshold'] = training_model.optimal_threshold
 
-
+    # reset frozen flag
+    metadata.data['frozen_finished'] = False
+    metadata.save(master_logdir)
+    
     return model, test_metrics
 
 def get_tokenizer(args):
