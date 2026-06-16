@@ -32,13 +32,13 @@ def load_prot_data(dataset_path, residues={'S', 'T', 'Y'}, ignore_index=-1, kina
     """
     df = pd.read_json(dataset_path)
     df = df.dropna()
-    df['sites'] = df['sites'].apply(lambda x: [int(i) - 1 for i in x])
+    df.loc[:, 'sites'] = df['sites'].apply(lambda x: [int(i) - 1 for i in x])
     labels = df.apply(partial(labeling_fn, residues=residues, ignore_index=ignore_index), axis=1)
     df['label'] = labels
     if kinases:
         return df[['id', 'sequence', 'label', 'kinase_labels']]
 
-    return df[['id', 'sequence', 'label', 'kinase_labels']]
+    return df[['id', 'sequence', 'label']]
 
 def generate_random_residues(num_samples, residue_id_mapping):
     if num_samples == 0:
@@ -252,7 +252,7 @@ def parse_residues(residue_string):
 
 def prepare_datasets(args, ignore_label):
 
-    prot_info = load_prot_data(args.prot_info_path, residues=parse_residues(args.residues), ignore_index=ignore_label)
+    prot_info = load_prot_data(args.prot_info_path, residues=parse_residues(args.residues), ignore_index=ignore_label, kinases=args.kinase)
     with open(args.dataset_path, 'r') as f:
         split_info = json.load(f)
     
