@@ -94,6 +94,12 @@ class LightningWrapper(L.LightningModule):
         
         self.loss_metric = MeanMetric()
         self.test_preds = []
+        self.optimal_threshold = 0
+        self.optimal_dev_metric_values = {
+            'f1' : 0,
+            'precision' : 0,
+            'recall' : 0
+        }
         self.debug = False
         if hasattr(args, "debug") and args.debug:
             self.debug = True
@@ -101,20 +107,20 @@ class LightningWrapper(L.LightningModule):
             
         self.save_hyperparameters(args)
 
-    def _compute_metrics_step(self, logits, labels, step_metrics, epoch_metrics, **kwargs):
+    def _compute_metrics_step(self, logits, labels, step_metrics, epoch_metrics, batch_size=None, **kwargs):
         step_vals = step_metrics(logits, labels)
         epoch_metrics.update(logits, labels.int())
-        self.log_dict(step_vals, sync_dist=True, prog_bar=True, logger=True)
+        self.log_dict(step_vals, sync_dist=True, prog_bar=True, logger=True, batch_size=batch_size)
 
     def training_step(self, batch, batch_idx):
         loss, logits, outputs = self.classifier.train_predict(**batch)
-        self.log('train_loss', loss, logger=True, prog_bar=True, sync_dist=True)
+        self.log('train_loss', loss, logger=True, prog_bar=True, sync_dist=True, batch_size=self.hparams.batch_size)
         self._compute_metrics_step(logits.view(-1), batch['labels'].view(-1),
                                    self.train_step_metrics, self.train_epoch_metrics)
         
         if self.predicting_kinases:
             self._compute_metrics_step(outputs['kinase_logits'][batch['labels'] == 1].view(-1), batch['kinase_labels'].view(-1),
-                                       self.train_kinase_step_metrics, self.train_kinase_epoch_metrics)
+                                       self.train_kinase_step_metrics, self.train_kinase_epoch_metrics, batch_size=int((batch['labels'] == 1).sum()))
         
         if self.debug:
             if self.print_counter >= 250:
@@ -129,13 +135,14 @@ class LightningWrapper(L.LightningModule):
 
     def _eval_step(self, batch, batch_idx, type : str):
         loss, logits, outputs = self.classifier.predict(**batch)
-        self.log(f'{type}_loss', loss, logger=True, prog_bar=True, sync_dist=True)
+        self.log(f'{type}_loss', loss, logger=True, prog_bar=True, sync_dist=True, batch_size=self.hparams.batch_size)
         self._compute_metrics_step(logits.view(-1), batch['labels'].view(-1), 
                                    self.__getattr__(f'{type}_step_metrics'), self.__getattr__(f'{type}_epoch_metrics'))
         
         if self.predicting_kinases:
             self._compute_metrics_step(outputs['kinase_logits'][batch['labels'] == 1].view(-1), batch['kinase_labels'].view(-1),
-                                       self.__getattr__(f'{type}_kinase_step_metrics'), self.__getattr__(f'{type}_kinase_epoch_metrics'))
+                                       self.__getattr__(f'{type}_kinase_step_metrics'), self.__getattr__(f'{type}_kinase_epoch_metrics'),
+                                       batch_size=int((batch['labels'] == 1).sum()))
             
         return loss, logits, outputs
     
@@ -192,15 +199,13 @@ class LightningWrapper(L.LightningModule):
     def on_train_epoch_start(self):
         self._shared_epoch_start('train')
 
-    def on_train_epoch_end(self) -> None:
-        self.train_epoch_metrics.compute()
-        log_directly = { k : v for k, v in self.train_epoch_metrics.items() if not (k.endswith('prcurve') or k.endswith('confusion_matrix'))}
-        self.log_dict(log_directly, logger=True, prog_bar=True, sync_dist=True)
-
-    def _log_epoch_metrics(self, epoch_metrics):
+    def _log_epoch_metrics(self, epoch_metrics, save_image=True):
         epoch_metrics.compute()
         log_directly = { k : v for k, v in epoch_metrics.items() if not (k.endswith('prcurve') or k.endswith('confusion_matrix'))}
         self.log_dict(log_directly, prog_bar=True, logger=True, sync_dist=True)
+        
+        if not save_image:
+            return
         
         log_image_metrics = { k for k in epoch_metrics.keys() if (k.endswith('prcurve') or k.endswith('confusion_matrix'))}
         for metric in log_image_metrics:
@@ -231,9 +236,13 @@ class LightningWrapper(L.LightningModule):
 
         f1_scores = (2 * precision_bound * recall_bound) / (precision_bound + recall_bound + 1e-10)
         best_idx = torch.argmax(f1_scores)
-
+        if f1_scores[best_idx].cpu().numpy() < self.optimal_dev_metric_values['f1']:
+            return
+        
         optimal_threshold = thresholds[best_idx]
+        print(f'optimum_changed: {optimal_threshold}')
         self.optimal_threshold = float(optimal_threshold.cpu())
+        
         self.optimal_dev_metric_values = {
             'f1' : torch.max(f1_scores).cpu().numpy(),
             'precision' : float(precision_bound[best_idx].cpu()),
@@ -255,9 +264,14 @@ class LightningWrapper(L.LightningModule):
                 'recall' : recall_bound[best_idx]
             }
     
-    def _shared_epoch_end(self, mode):
+    def _shared_epoch_end(self, mode, save_image=True):
         epoch_metrics = self.__getattr__(f'{mode}_epoch_metrics')
-        self._log_epoch_metrics(epoch_metrics)
+        self._log_epoch_metrics(epoch_metrics, save_image=save_image)
+
+    def on_train_epoch_end(self) -> None:
+        self._shared_epoch_end('train', save_image=False)
+        if self.predicting_kinases:
+            self._shared_epoch_end('train_kinase', save_image=False)
 
     def on_validation_epoch_end(self) -> None:
         self.find_optimal_threhsold()
@@ -382,17 +396,21 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
                                     train_epochs=args.frozen_epochs, lr=args.frozen_lr)
         trainer = L.Trainer(logger=logger, callbacks=callbacks, max_epochs=args.frozen_epochs,
                             deterministic=True, log_every_n_steps=1,  accumulate_grad_batches=args.accum, strategy=strategy,
-                            default_root_dir=logdir)
+                            default_root_dir=logdir, num_sanity_val_steps=0)
 
         trainer.fit(training_model, train, dev, ckpt_path=args.checkpoint_path)
         metadata.data['frozen_finished'] = True
         metadata.save(master_logdir)
+        best = torch.load(f'{logdir}/best.ckpt')
+        training_model.load_state_dict(best['state_dict'])
+        model = training_model.classifier
+
 
     print('Unfrozen phase training')
     # Unfrozen training
     trainer = L.Trainer(logger=logger, callbacks=callbacks, max_epochs=args.epochs,
                         deterministic=True, log_every_n_steps=1,  accumulate_grad_batches=args.accum, strategy=strategy,
-                        default_root_dir=logdir)
+                        default_root_dir=logdir, num_sanity_val_steps=0)
     model.unfreeze_phase()
     if not isinstance(model, LightningWrapper):
         training_model = LightningWrapper(args, model, step_metrics=step_metrics, epoch_metrics=epoch_metrics, ds_size=len(train), logdir=logdir,
