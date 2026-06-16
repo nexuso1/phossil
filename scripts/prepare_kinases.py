@@ -16,7 +16,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 def create_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--prot_info', default='../data/dbptm/dbptm_info.json', help='Prot info file path')
+    parser.add_argument('--prot_info', default='../data/uniptm/uniptm_info_S.json', help='Prot info file path')
     parser.add_argument('--mode', type=str, choices=['percentile', 'threshold', 'sigmoid'], default='threshold')
     parser.add_argument('--threshold', type=float, default=90, help='Threhsold for percentile thresholding. Can be None. Used only with the "threshold" mode.')
     parser.add_argument('--out_path', type=str, default=None, help='Output path.')
@@ -211,8 +211,9 @@ def get_kinase_to_idx():
 def main(args):
     prot_info = pd.read_json(args.prot_info)
     prot_info.loc[:, 'sites'] = prot_info.sites.apply(lambda x: sorted(x, key=int))
-    sites = prot_info.sites.apply(lambda x: sorted([int(site) - 1 for site in x]))
-    sequences = prot_info.sequence
+    sites = prot_info.sites.apply(lambda x: sorted([int(site) - 1 for site in x])).to_list()
+    # Replace rare AAs so that Kinase library is happy
+    sequences = prot_info.sequence.apply(lambda x: re.sub(r'[UZOB]', 'X', x)).to_list()
     preds_path = f"{args.prot_info.removesuffix('.json')}_kinase_preds.json"
     kinase_to_index = get_kinase_to_idx()
 
@@ -221,12 +222,12 @@ def main(args):
         total_scores = []
         total_percentiles = []
 
-        for pred in preds:
+        for i, pred in enumerate(preds):
             total_scores.append(pred['scores'])
             total_percentiles.append(pred['percentiles'])
 
         prot_info = prot_info.assign(kinase_scores = total_scores, kinase_percentiles=total_percentiles)
-        prot_info.to_json(preds_path, indent=2)
+        prot_info.to_json(preds_path)
 
         with open(os.path.join(os.path.dirname(args.prot_info), 'kinase_to_idx.json'), 'w') as f:
             json.dump(kinase_to_index, f, indent=2)
@@ -242,7 +243,7 @@ def main(args):
         os.makedirs(os.path.dirname(args.out_path), exist_ok=True)
     labels = compute_kinase_labels(preds['kinase_scores'], preds['kinase_percentiles'], args.threshold, args.mode)
     prot_info = prot_info.assign(kinase_labels=labels)
-    prot_info.to_json(args.out_path, indent=2)
+    prot_info.to_json(args.out_path)
 
 if __name__ == '__main__':
     parser = create_parser()
