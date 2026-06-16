@@ -535,7 +535,14 @@ def run_training(args : Namespace, create_model_fn):
 
     master_logdir = args.logdir
 
-    for fold in range(meta.data['current_fold'], full_dataset.n_splits):
+    if args.fold is not None:
+        # Single fold training
+        start, end = args.fold, args.fold + 1
+
+    else:
+        start, end = meta.data['current_fold'], full_dataset.n_splits
+
+    for fold in range(start, end):
 
         print(f'Current fold: {fold}')
         train_ds, dev_ds, test_ds = full_dataset.get_fold(fold)
