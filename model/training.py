@@ -446,7 +446,7 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
     # reset frozen flag
     metadata.data['frozen_finished'] = False
     metadata.save(master_logdir)
-    
+
     return model, test_metrics
 
 def get_tokenizer(args):
@@ -509,8 +509,6 @@ def create_metrics(ignore_index):
 
     epoch_metrics = MetricCollection({
         'f1' : F1Score(task='binary', ignore_index=ignore_index),
-        'prcurve' : PrecisionRecallCurve('binary', ignore_index=ignore_index),
-        'confusion_matrix' : ConfusionMatrix('binary', ignore_index=ignore_index), 
         'precision' : Precision(task='binary',ignore_index=ignore_index),
         'recall' : Recall(task='binary', ignore_index=ignore_index),
         'auroc' : AUROC('binary', ignore_index=ignore_index),
