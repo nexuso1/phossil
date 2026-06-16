@@ -56,7 +56,7 @@ parser.add_argument('--model_path', help='Load model from this path (not a check
 parser.add_argument('--focal', help='Use focal loss. In this mode, pos_weight will be treated as the alpha parameter.', action='store_true', default=False)
 parser.add_argument('--residues', help='List of residues to train on', default="['S', 'T', 'Y']", type=str)
 parser.add_argument('--ignore_label', help='Label that will be ignored by the loss', default=-1, type=int)
-parser.add_argument('--patience', help='Patience during training', default=20, type=int)
+parser.add_argument('--patience', help='Patience during training', default=5, type=int)
 parser.add_argument('--debug', help='Debug mode', default=False, action='store_true')
 parser.add_argument('--step_lr', help='Use StepLR scheduler', default=False, action='store_true')
 parser.add_argument('--release', help='Train in the release mode (using ALL data available, no test set)', default=False, action='store_true')
