@@ -16,12 +16,18 @@ def remove_long_sequences(df, max_length):
     mask = df['sequence'].apply(lambda x: len(x) < max_length)
     return df[mask]
 
-def labeling_fn(row, residues={'S', 'T', 'Y'}, ignore_index=-1):
+def labeling_fn(row, residues={'S', 'T', 'Y'}, ignore_index=-1, kinases=False):
     res = np.zeros(len(row['sequence']), dtype=np.int32) + ignore_index
     mask = [s in residues for s in row['sequence']] # Only relevant prots are not ignored
     res[mask] = 0
     valid_sites = [i for i in row['sites'] if row['sequence'][i] in residues]
     res[valid_sites] = 1
+
+    if kinases:
+        k_res = [row['kinase_labels'][i] for i, site in enumerate(row['sites']) if row['sequence'][site] in residues]
+        if not (len(valid_sites) == len(k_res)):
+            raise ValueError('Mismatched number of sites and kinase labels')
+        return res, k_res
 
     return res
 
@@ -33,9 +39,16 @@ def load_prot_data(dataset_path, residues={'S', 'T', 'Y'}, ignore_index=-1, kina
     df = pd.read_json(dataset_path)
     df = df.dropna()
     df.loc[:, 'sites'] = df['sites'].apply(lambda x: [int(i) - 1 for i in x])
-    labels = df.apply(partial(labeling_fn, residues=residues, ignore_index=ignore_index), axis=1)
-    df['label'] = labels
+    # Filter out non STY sites
+    df.loc[:, 'sites'] = df.apply(lambda x: [site for site in x['sites'] if x['sequence'][site] in {'S', 'T', 'Y'}], axis=1)
     if kinases:
+        labels, kinase_labels = zip(*df.apply(partial(labeling_fn, residues=residues, ignore_index=ignore_index, kinases=kinases), axis=1))
+    else:
+        labels = df.apply(partial(labeling_fn, residues=residues, ignore_index=ignore_index), axis=1)
+
+    df['label'] = labels    
+    if kinases:
+        df = df.assign(kinase_labels=kinase_labels)
         return df[['id', 'sequence', 'label', 'kinase_labels']]
 
     return df[['id', 'sequence', 'label']]
