@@ -210,7 +210,7 @@ def get_kinase_to_idx():
 
 def main(args):
     prot_info = pd.read_json(args.prot_info)
-    prot_info.loc[:, 'sites'] = prot_info.sites.apply(lambda x: sorted(x, key=int))
+    prot_info.loc[:, 'sites'] = prot_info.sites.apply(lambda x: sorted(list(set(x)), key=int))
     sites = prot_info.sites.apply(lambda x: sorted([int(site) - 1 for site in x])).to_list()
     # Replace rare AAs so that Kinase library is happy
     sequences = prot_info.sequence.apply(lambda x: re.sub(r'[UZOB]', 'X', x)).to_list()
