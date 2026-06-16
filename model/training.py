@@ -210,11 +210,14 @@ class LightningWrapper(L.LightningModule):
         log_image_metrics = { k for k in epoch_metrics.keys() if (k.endswith('prcurve') or k.endswith('confusion_matrix'))}
         for metric in log_image_metrics:
             fig, ax = plt.subplots(figsize=(10, 10))
-            if metric.endswith('prcurve'):
-                epoch_metrics[metric].plot(ax=ax, score=True)
-            else:
-                epoch_metrics[metric].plot(ax=ax)
-            
+            try:
+                if metric.endswith('prcurve'):
+                    epoch_metrics[metric].plot(ax=ax, score=True)
+                else:
+                    epoch_metrics[metric].plot(ax=ax)
+            except IndexError:
+                print(epoch_metrics[metric].compute())
+                break
             buf = io.BytesIO()
             fig.savefig(buf, format="png", bbox_inches="tight")
             buf.seek(0)
