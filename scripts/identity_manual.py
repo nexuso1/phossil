@@ -26,29 +26,31 @@ def load_sequences(path_or_seq, num=None):
         return pd.DataFrame.from_records([(id, seq)], columns=['id', 'sequence'])
 
 
+def task_iter(sequencesA, sequencesB):
+    for i in range(len(sequencesA)):
+        for j in range(len(sequencesB)):
+            yield (i, j, sequencesA[i], sequencesB[j])
+
+def task_func(args : tuple[int, int, Seq, Seq]):
+    i, j, seqA, seqB= args
+    return i, j, compute_identity((seqA, seqB))
+
 def compute_similarity_matrix(sequencesA, sequencesB, max_workers=None, chunk_size=None):
     res_global = np.zeros(shape=(len(sequencesA), len(sequencesB)))
     res_shortest, res_shortest_gapped = np.zeros_like(res_global), np.zeros_like(res_global)
     records = []
 
-    tasks = [
-        (i, j, sequencesA[i], sequencesB[j])
-        for i in range(len(sequencesA))
-        for j in range(len(sequencesB))
-    ]
-    
-    task_pairs = [(seqA, seqB) for _, _, seqA, seqB in tasks]
-    print(len(task_pairs))
+    tasks = task_iter(sequencesA, sequencesB)
     results = process_map(
-        compute_identity,
-        task_pairs,
+        task_func,
+        tasks,
         desc='Computing similarities',
         smoothing=0.05,
         max_workers=max_workers,
         chunksize=chunk_size,
     )
 
-    for (i, j, _, _), result in zip(tasks, results):
+    for i, j, result in results:
         result['idxA'] = i
         result['idxB'] = j
         
