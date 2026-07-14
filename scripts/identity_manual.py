@@ -25,12 +25,6 @@ def load_sequences(path_or_seq, num=None):
         seq = Seq(path_or_seq)
         return pd.DataFrame.from_records([(id, seq)], columns=['id', 'sequence'])
 
-
-def task_iter(sequencesA, sequencesB):
-    for i in range(len(sequencesA)):
-        for j in range(len(sequencesB)):
-            yield (i, j, sequencesA[i], sequencesB[j])
-
 def task_func(args : tuple[int, int, Seq, Seq]):
     i, j, seqA, seqB= args
     return i, j, compute_identity((seqA, seqB))
@@ -40,7 +34,7 @@ def compute_similarity_matrix(sequencesA, sequencesB, max_workers=None, chunk_si
     res_shortest, res_shortest_gapped = np.zeros_like(res_global), np.zeros_like(res_global)
     records = []
 
-    tasks = task_iter(sequencesA, sequencesB)
+    tasks = [(i, j, sequencesA[i], sequencesB[j]) for j in range(len(sequencesB)) for i in range(len(sequencesA))]
     results = process_map(
         task_func,
         tasks,
@@ -48,6 +42,7 @@ def compute_similarity_matrix(sequencesA, sequencesB, max_workers=None, chunk_si
         smoothing=0.05,
         max_workers=max_workers,
         chunksize=chunk_size,
+        total=len(sequencesA) * len(sequencesB)
     )
 
     for i, j, result in results:
@@ -150,7 +145,7 @@ if __name__ == '__main__':
     parser.add_argument('seqsB', type=str, help='Path to a .fasta file or a single sequence')
     parser.add_argument('--save_matrices', action='store_true', help='Save individual identity matrices as separate files. Optional, because pairwise identity information is already included in the detailed summary file.')
     parser.add_argument('--max_workers', type=int, default=15)
-    parser.add_argument('--chunk_size', type=int, default=8, help='Number of sequence pairs passed to a worker subprocess')
+    parser.add_argument('--chunk_size', type=int, default=256, help='Number of sequence pairs passed to a worker subprocess')
     parser.add_argument('-o', type=str, help='Output folder')
     parser.add_argument('-n', type=str, help='Output base name')
     args = parser.parse_args()
