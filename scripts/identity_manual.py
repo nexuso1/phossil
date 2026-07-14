@@ -4,8 +4,8 @@ import numpy as np
 import argparse
 import os
 
+from multiprocessing import Pool
 from pathlib import Path
-from tqdm.contrib.concurrent import process_map
 from Bio.Align import PairwiseAligner
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -35,24 +35,21 @@ def compute_similarity_matrix(sequencesA, sequencesB, max_workers=None, chunk_si
     records = []
 
     tasks = [(i, j, sequencesA[i], sequencesB[j]) for j in range(len(sequencesB)) for i in range(len(sequencesA))]
-    results = process_map(
-        task_func,
-        tasks,
-        desc='Computing similarities',
-        smoothing=0.05,
-        max_workers=max_workers,
-        chunksize=chunk_size,
-        total=len(sequencesA) * len(sequencesB)
-    )
-
-    for i, j, result in results:
-        result['idxA'] = i
-        result['idxB'] = j
+    count = 0
+    with Pool(max_workers) as pool:
+        for i, j, result in pool.imap_unordered( task_func, tasks, chunksize=chunk_size):
         
-        res_global[i, j] = result['identity_global']
-        res_shortest[i, j] = result['identity_shortest']
-        res_shortest_gapped[i, j] = result['identity_shortest_gapped']
-        records.append(result)
+            result['idxA'] = i
+            result['idxB'] = j
+            
+            res_global[i, j] = result['identity_global']
+            res_shortest[i, j] = result['identity_shortest']
+            res_shortest_gapped[i, j] = result['identity_shortest_gapped']
+            records.append(result)
+            count += 1
+
+            if count % 10000 == 0:
+                print(count)
 
     return res_global, res_shortest, res_shortest_gapped, pd.DataFrame.from_records(records)
 
