@@ -123,7 +123,7 @@ def save_detailed_results(result_df : pd.DataFrame, idxA, idxB, idsA, idsB, out_
     result_df['id_seqB'] = [idsB[i] for i in idxB]
     result_df.to_parquet(out_path.with_suffix('.parquet.zst'), compression='zstd')
 
-def compute_matrix_info(matrix):
+def compute_matrix_info(matrix, ignore_diagonal=False):
     metrics = {
         'mean' : np.mean,
         'std' : np.std,
@@ -131,17 +131,20 @@ def compute_matrix_info(matrix):
         'max' : np.max
     }
 
+    if ignore_diagonal:
+        matrix = matrix[~np.eye(matrix.shape[0], dtype=bool).reshape(matrix.shape[0], -1)]
+
     return { name : metric(matrix) for name, metric in metrics.items()}
 
 def save_matrix(matrix, idsA, idsB, out_path : Path):
     df = pd.DataFrame(matrix, index=idsA, columns=idsB)
     df.to_parquet(out_path.with_suffix('.parquet.zst'), compression='zstd')
 
-def save_result_summary(glob_matrix, loc_matrix, align_matrix, out_path : Path):
+def save_result_summary(glob_matrix, loc_matrix, align_matrix, out_path : Path, ignore_diagonal=False):
     pd.DataFrame.from_dict({
-        'global' : compute_matrix_info(glob_matrix),
-        'local' : compute_matrix_info(loc_matrix),
-        'local_gapped' : compute_matrix_info(align_matrix),
+        'global' : compute_matrix_info(glob_matrix, ignore_diagonal),
+        'local' : compute_matrix_info(loc_matrix, ignore_diagonal),
+        'local_gapped' : compute_matrix_info(align_matrix, ignore_diagonal),
     }).T.to_csv(out_path.with_suffix('.csv'), float_format='%.4f', index_label='type')
 
 if __name__ == '__main__':
@@ -174,7 +177,7 @@ if __name__ == '__main__':
         for matrix, suffix in zip((glob_matrix, loc_matrix, local_gapped), ('_global_sim_matrix', '_local_sim_matrix', '_local_gapped_sim_matrix')):
             save_matrix(matrix, idsA=idsA, idsB=idsB, out_path=out_dir / f'{name}{suffix}')
 
-    save_result_summary(glob_matrix, loc_matrix, local_gapped, out_dir / f'{name}_sim_summary')
+    save_result_summary(glob_matrix, loc_matrix, local_gapped, out_dir / f'{name}_sim_summary', ignore_diagonal=args.seqsA == args.seqsB)
 
     for path in glob.glob(f'{str(out_dir)}/chunks/{name}_identity_chunk*'):
         count = Path(path).name.removesuffix('.json').split('_')[-1]
