@@ -3,13 +3,14 @@ import pandas as pd
 import numpy as np
 import argparse
 import os
+import json
+import glob
 
 from multiprocessing import Pool
 from pathlib import Path
 from Bio.Align import PairwiseAligner
 from Bio import SeqIO
 from Bio.Seq import Seq
-from Bio.SeqRecord import SeqRecord
 
 def load_sequences(path_or_seq, num=None):
     recs = []
@@ -29,7 +30,7 @@ def task_func(args : tuple[int, int, Seq, Seq]):
     i, j, seqA, seqB= args
     return i, j, compute_identity((seqA, seqB))
 
-def compute_similarity_matrix(sequencesA, sequencesB, max_workers=None, chunk_size=None):
+def compute_similarity_matrix(sequencesA, sequencesB, out_path, max_workers=None, chunk_size=None):
     res_global = np.zeros(shape=(len(sequencesA), len(sequencesB)))
     res_shortest, res_shortest_gapped = np.zeros_like(res_global), np.zeros_like(res_global)
     records = []
@@ -49,9 +50,15 @@ def compute_similarity_matrix(sequencesA, sequencesB, max_workers=None, chunk_si
             count += 1
 
             if count % 10000 == 0:
-                print(count)
+                with open(f'{str(out_path)}/identity_chunk_{count}.json', 'w') as f:
+                    json.dump(records, f)
+                    records.clear()
 
-    return res_global, res_shortest, res_shortest_gapped, pd.DataFrame.from_records(records)
+    with open(f'{str(out_path)}/identity_chunk_{count}.json', 'w') as f:
+        json.dump(records, f)
+        records.clear()
+
+    return res_global, res_shortest, res_shortest_gapped
 
 def get_aligner():
         aligner = PairwiseAligner()
@@ -106,8 +113,8 @@ def compute_identity(sequences : tuple[str, str], verbose=0):
         'identity_global' : identity_by_alignment,
         'identity_shortest' : identity_by_shortest,
         'identity_shortest_gapped' : identity_by_shortest_gapped_length,
-        'seqA_aligned' : seqA_aligned,
-        'seqB_aligned' : seqB_aligned 
+        'seqA_aligned' : str(seqA_aligned),
+        'seqB_aligned' : str(seqB_aligned) 
     }
 
 def save_detailed_results(result_df : pd.DataFrame, idxA, idxB, idsA, idsB, out_path):
@@ -148,12 +155,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
     seqsA = load_sequences(args.seqsA, 'A')
     seqsB = load_sequences(args.seqsB, 'B')
-
-    glob_matrix, loc_matrix, local_gapped, detailed_results = compute_similarity_matrix(seqsA.sequence.to_list(), seqsB.sequence.to_list(), max_workers=args.max_workers, chunk_size=args.chunk_size)
     out_dir = Path(args.o)
+    os.makedirs(out_dir, exist_ok=True)
+    
+    glob_matrix, loc_matrix, local_gapped = compute_similarity_matrix(seqsA.sequence.to_list(), seqsB.sequence.to_list(), max_workers=args.max_workers, chunk_size=args.chunk_size, out_path=out_dir)
+
     name = args.n
 
-    os.makedirs(out_dir, exist_ok=True)
+    
     idsA=seqsA.id.to_list()
     idsB=seqsB.id.to_list()
     if args.save_matrices:
@@ -161,11 +170,18 @@ if __name__ == '__main__':
             save_matrix(matrix, idsA=idsA, idsB=idsB, out_path=out_dir / f'{name}{suffix}')
 
     save_result_summary(glob_matrix, loc_matrix, local_gapped, out_dir / f'{name}_sim_summary')
-    save_detailed_results(
-        detailed_results.drop(columns=['idxA', 'idxB']),
-        idxA=detailed_results.idxA.to_list(),
-        idxB=detailed_results.idxB.to_list(),
-        idsA=seqsA.id,
-        idsB=seqsB.id, 
-        out_path=out_dir / f'{name}_detailed_results'
-    )
+
+    for path in glob.glob(f'{str(out_dir)}/identity_chunk*'):
+        count = Path(path).name.removesuffix('.json').split('_')[-1]
+        with open(path, 'r') as f:
+            records = json.load(f)
+
+        detailed_results = pd.DataFrame.from_records(records)
+        save_detailed_results(
+            detailed_results.drop(columns=['idxA', 'idxB']),
+            idxA=detailed_results.idxA.to_list(),
+            idxB=detailed_results.idxB.to_list(),
+            idsA=seqsA.id,
+            idsB=seqsB.id, 
+            out_path=out_dir / f'{name}_detailed_results_{count}'
+        )
