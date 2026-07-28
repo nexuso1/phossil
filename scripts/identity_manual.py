@@ -30,13 +30,14 @@ def task_func(args : tuple[int, int, Seq, Seq]):
     i, j, seqA, seqB= args
     return i, j, compute_identity((seqA, seqB))
 
-def compute_similarity_matrix(sequencesA, sequencesB, out_path, max_workers=None, chunk_size=None):
+def compute_similarity_matrix(sequencesA, sequencesB, out_dir, name, max_workers=None, chunk_size=None):
     res_global = np.zeros(shape=(len(sequencesA), len(sequencesB)))
     res_shortest, res_shortest_gapped = np.zeros_like(res_global), np.zeros_like(res_global)
     records = []
 
     tasks = [(i, j, sequencesA[i], sequencesB[j]) for j in range(len(sequencesB)) for i in range(len(sequencesA))]
     count = 0
+    os.makedirs(out_dir / 'chunks', exist_ok=True)
     with Pool(max_workers) as pool:
         for i, j, result in pool.imap_unordered( task_func, tasks, chunksize=chunk_size):
         
@@ -50,11 +51,11 @@ def compute_similarity_matrix(sequencesA, sequencesB, out_path, max_workers=None
             count += 1
 
             if count % 10000 == 0:
-                with open(f'{str(out_path)}/identity_chunk_{count}.json', 'w') as f:
+                with open(f'{str(out_dir)}/chunks/{name}_identity_chunk_{count}.json', 'w') as f:
                     json.dump(records, f)
                     records.clear()
 
-    with open(f'{str(out_path)}/identity_chunk_{count}.json', 'w') as f:
+    with open(f'{str(out_dir)}/chunks/{name}_identity_chunk_{count}.json', 'w') as f:
         json.dump(records, f)
         records.clear()
 
@@ -141,7 +142,7 @@ def save_result_summary(glob_matrix, loc_matrix, align_matrix, out_path : Path):
         'global' : compute_matrix_info(glob_matrix),
         'local' : compute_matrix_info(loc_matrix),
         'local_gapped' : compute_matrix_info(align_matrix),
-    }).T.to_csv(out_path.with_suffix('.csv'), float_format='%.4f', index=False)
+    }).T.to_csv(out_path.with_suffix('.csv'), float_format='%.4f', index_label='type')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -155,10 +156,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
     seqsA = load_sequences(args.seqsA, 'A')
     seqsB = load_sequences(args.seqsB, 'B')
+
+    print(args.seqsA)
+    print(args.seqsB)
+
     out_dir = Path(args.o)
     os.makedirs(out_dir, exist_ok=True)
     
-    glob_matrix, loc_matrix, local_gapped = compute_similarity_matrix(seqsA.sequence.to_list(), seqsB.sequence.to_list(), max_workers=args.max_workers, chunk_size=args.chunk_size, out_path=out_dir)
+    glob_matrix, loc_matrix, local_gapped = compute_similarity_matrix(seqsA.sequence.to_list(), seqsB.sequence.to_list(), max_workers=args.max_workers, chunk_size=args.chunk_size, out_dir=out_dir, name=args.n)
 
     name = args.n
 
@@ -171,7 +176,7 @@ if __name__ == '__main__':
 
     save_result_summary(glob_matrix, loc_matrix, local_gapped, out_dir / f'{name}_sim_summary')
 
-    for path in glob.glob(f'{str(out_dir)}/identity_chunk*'):
+    for path in glob.glob(f'{str(out_dir)}/chunks/{name}_identity_chunk*'):
         count = Path(path).name.removesuffix('.json').split('_')[-1]
         with open(path, 'r') as f:
             records = json.load(f)
@@ -181,7 +186,7 @@ if __name__ == '__main__':
             detailed_results.drop(columns=['idxA', 'idxB']),
             idxA=detailed_results.idxA.to_list(),
             idxB=detailed_results.idxB.to_list(),
-            idsA=seqsA.id,
-            idsB=seqsB.id, 
+            idsA=idsA,
+            idsB=idsB, 
             out_path=out_dir / f'{name}_detailed_results_{count}'
         )
