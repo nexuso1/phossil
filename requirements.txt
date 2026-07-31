@@ -1,4 +1,5 @@
 biopython
+esm @ git+https://github.com/Biohub/esm.git@main
 torch
 datasets
 transformers

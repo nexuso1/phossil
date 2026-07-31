@@ -11,14 +11,15 @@ from torch.nn.functional import binary_cross_entropy_with_logits
 from itertools import chain
 from Bio import SeqIO
 from transformers import EsmModel, AutoTokenizer, EsmForMaskedLM, AutoModel, AutoModelForMaskedLM
+import esm  # noqa: F401 -- registers the `esmc` architecture with transformers' Auto classes
 
 
 def get_esm(type, masked_lm=False):
     if type == '600M-C':
-        repo_id = 'EvolutionaryScale/esmc-600m-2024-12'
+        repo_id = 'biohub/ESMC-600M'
         model_class = AutoModelForMaskedLM if masked_lm else AutoModel
-        model = model_class.from_pretrained(repo_id, trust_remote_code=True)
-        tokenizer = AutoTokenizer.from_pretrained(repo_id, trust_remote_code=True)
+        model = model_class.from_pretrained(repo_id)
+        tokenizer = AutoTokenizer.from_pretrained(repo_id)
         return model, tokenizer
 
     if masked_lm:
