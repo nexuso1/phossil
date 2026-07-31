@@ -10,17 +10,30 @@ import torch
 from torch.nn.functional import binary_cross_entropy_with_logits
 from itertools import chain
 from Bio import SeqIO
-from transformers import EsmModel, AutoTokenizer
+from transformers import EsmModel, AutoTokenizer, EsmForMaskedLM, AutoModel, AutoModelForMaskedLM
 
-def get_esm(type):
-    if type == '3B':
-        model, tokenizer = EsmModel.from_pretrained('facebook/esm2_t36_3B_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t36_3B_UR50D')
-    elif type == '15B':
-        model, tokenizer = EsmModel.from_pretrained('facebook/esm2_t48_15B_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t48_15B_UR50D')
-    elif type == '35M':
-        model, tokenizer = EsmModel.from_pretrained('facebook/esm2_t12_35M_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t12_35M_UR50D')
+
+def get_esm(type, masked_lm=False):
+    if type == '600M-C':
+        repo_id = 'EvolutionaryScale/esmc-600m-2024-12'
+        model_class = AutoModelForMaskedLM if masked_lm else AutoModel
+        model = model_class.from_pretrained(repo_id, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(repo_id, trust_remote_code=True)
+        return model, tokenizer
+
+    if masked_lm:
+        model_class = EsmForMaskedLM
     else:
-        model, tokenizer = EsmModel.from_pretrained('facebook/esm2_t33_650M_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t33_650M_UR50D')
+        model_class = EsmModel
+
+    if type == '3B':
+        model, tokenizer = model_class.from_pretrained('facebook/esm2_t36_3B_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t36_3B_UR50D')
+    elif type == '15B':
+        model, tokenizer = model_class.from_pretrained('facebook/esm2_t48_15B_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t48_15B_UR50D')
+    elif type == '35M':
+        model, tokenizer = model_class.from_pretrained('facebook/esm2_t12_35M_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t12_35M_UR50D')
+    else:
+        model, tokenizer = model_class.from_pretrained('facebook/esm2_t33_650M_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t33_650M_UR50D')
     return model, tokenizer
 
 

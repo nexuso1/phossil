@@ -1,8 +1,7 @@
 # This is the main entrypoint for running kinase-aware models
 
 from classifiers import KinaseFTClassifier, KinaseFTClassifierConfig
-from esm_train import get_esm
-from encoder import setup_config
+from utils import get_esm
 from ft_selective import add_arguments as add_ft_args
 from training import run_training, parser, create_loss
 from ast import literal_eval

@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 
 from sklearn.model_selection import train_test_split
 from torch.utils.data.dataset import Dataset
@@ -31,10 +30,7 @@ class FullProteinDataset:
                 self.tokenize_datasets()
             else:
                 raise ValueError('No tokenizer provided for pre-tokenization.')
-    
-    def tokenize_datasets(self):
-        ...
-
+            
     def get_fold(self, i):
         test = self.prot_info.loc[self.split_info[i]['test']]
         train = self.prot_info.loc[self.split_info[i]['train']]

@@ -1,7 +1,7 @@
 # This file is the main way to run traninig on finetuning models
 
 import ast
-from esm_train import get_esm
+from utils import get_esm
 from training import  parser, create_loss, run_training
 from classifiers import SelectiveFinetuningClassifier, SelectiveFinetuningClassifierConfig
 

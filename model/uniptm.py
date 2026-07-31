@@ -1,7 +1,7 @@
 # This is the main entrypoint for running UniPTM-based models
 
 from classifiers import UniPTM, TokenClassifierConfig
-from esm_train import get_esm
+from utils import get_esm
 from training import run_training, create_loss, parser
 
 def create_model(args):

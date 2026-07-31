@@ -1,6 +1,6 @@
 # This is the main entrypoint for running linear models
 
-from esm_train import get_esm
+from utils import get_esm
 from classifiers import LinearClassifier, TokenClassifierConfig
 from training import run_training, parser, create_loss
 

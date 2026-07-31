@@ -1,4 +1,4 @@
-from esm_train import get_esm
+from utils import get_esm
 from training import create_loss, run_training, parser
 from classifiers import RecyclingClassifier, RecyclingClassifierConfig
 

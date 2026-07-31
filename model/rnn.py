@@ -1,7 +1,6 @@
 from classifiers import RNNTokenClassifier, RNNTokenClassiferConfig
-from transformers import AutoTokenizer
 from training import parser, create_loss, run_training
-from esm_train import get_esm
+from utils import get_esm
 
 def create_model(args):
     base, tokenizer = get_esm(args.type)
