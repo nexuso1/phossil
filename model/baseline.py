@@ -1,7 +1,22 @@
-import ast
-from esm_train import get_esm
+from utils import get_esm
 from training import  parser, create_loss, run_training
-from classifiers import BaselineClassifier, TokenClassifierConfig
+from token_classifier_base import TokenClassifierConfig, TokenClassifier
+import torch
+
+class BaselineClassifier(TokenClassifier):
+    """
+    Linear classifier on base model embeddings.
+    """
+    def __init__(self, config, base_model):
+        super().__init__(config, base_model)
+        self.classifier = torch.nn.Linear(base_model.config.hidden_size, config.n_labels)
+        self.init_weights(self.classifier)
+        self.set_base_requires_grad(False)
+        self.base.eval()
+
+    def forward(self, input_ids=None, attention_mask=None, **kwargs):
+        self.base.eval()
+        return super().forward(input_ids, attention_mask, **kwargs)
 
 def create_model(args):
     esm, tokenizer = get_esm(args.type)

@@ -35,8 +35,8 @@ parser.add_argument('--epochs', type=int, help='Number of training epochs', defa
 parser.add_argument('--frozen_epochs', type=int, default=0, help='Number of training epochs with the base model frozen')
 parser.add_argument('--prot_info_path', type=str, 
                      help='Path to the protein dataset. Expects a dataframe with columns ("id", "sequence", "sites"). "sequence" is the protein AA string, "sites" is a list of phosphorylation sites.',
-                     default='../data/phosphosite_sequences/phosphosite_df.json')
-parser.add_argument('--dataset_path', type=str, help='Path to the prepared dataset, with information about train, test sets; and folds.', default='../data/splits_S.json')
+                     default='../data/dbptm/dbptm_info.json')
+parser.add_argument('--dataset_path', type=str, help='Path to the prepared dataset, with information about train, test sets; and folds.', default='../data/dbptm/splits_S.json')
 parser.add_argument('--weight_decay', type=float, help='Weight decay', default=1e-4)
 parser.add_argument('--accum', type=int, help='Number of gradient accumulation steps', default=3)
 parser.add_argument('--hidden_size', type=int, help='Classifier hidden size', default=128)

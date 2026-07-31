@@ -1,7 +1,46 @@
 import ast
-from esm_train import get_esm
+import torch
+
+from utils import get_esm
 from training import  parser, create_loss, run_training
-from classifiers import RecyclingFinetuningClassifier, RecyclingFinetuningClassifierConfig
+from token_classifier_base import TokenClassifierConfig
+from ft_selective import SelectiveFinetuningClassifier
+from dataclasses import dataclass, field
+from torch.nn import Module
+
+@dataclass
+class RecyclingFinetuningClassifierConfig(TokenClassifierConfig):
+    unfreeze_indices : list[int] = field(default_factory= lambda : [-1])
+    n_steps : int = 3
+
+class RecyclingFinetuningClassifier(SelectiveFinetuningClassifier):
+    def __init__(self, config: RecyclingFinetuningClassifierConfig, base_model: Module) -> None:
+        super().__init__(config, base_model)
+
+    def recycle_iteration(self, prev : torch.Tensor):
+        # Assumes indices in a sequence
+        for i in sorted(self.modified_indices):
+                    
+            base_out = self.base.encoder.layer[i](prev)
+            if type(base_out) is tuple:
+                base_out = base_out[0]
+            prev = prev + base_out
+
+        if self.base.encoder.emb_layer_norm_after:
+            prev = self.base.encoder.emb_layer_norm_after(prev)
+
+        return prev
+        
+    def classifier_features(self, first_pass_outputs : torch.Tensor, **kwargs):
+        recycled_state = first_pass_outputs.detach()
+        
+        for i in range(self.config.n_steps):
+            recycled_state = self.recycle_iteration(recycled_state)
+            if i < self.config.n_steps - 1:
+                recycled_state = recycled_state.detach()
+
+        return recycled_state
+
 
 def create_model(args):
     esm, tokenizer = get_esm(args.type)
