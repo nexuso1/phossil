@@ -41,8 +41,8 @@ def compute_similarity_matrix(sequencesA, sequencesB, out_dir, name, max_workers
     with Pool(max_workers) as pool:
         for i, j, result in pool.imap_unordered( task_func, tasks, chunksize=chunk_size):
         
-            result['idxA'] = i
-            result['idxB'] = j
+            result['id_seqA'] = sequencesA[i]
+            result['id_seqB'] = sequencesB[j]
             
             res_global[i, j] = result['identity_global']
             res_shortest[i, j] = result['identity_shortest']
@@ -179,17 +179,17 @@ if __name__ == '__main__':
 
     save_result_summary(glob_matrix, loc_matrix, local_gapped, out_dir / f'{name}_sim_summary', ignore_diagonal=args.seqsA == args.seqsB)
 
-    for path in glob.glob(f'{str(out_dir)}/chunks/{name}_identity_chunk*'):
-        count = Path(path).name.removesuffix('.json').split('_')[-1]
-        with open(path, 'r') as f:
-            records = json.load(f)
+    # for path in glob.glob(f'{str(out_dir)}/chunks/{name}_identity_chunk*'):
+    #     count = Path(path).name.removesuffix('.json').split('_')[-1]
+    #     with open(path, 'r') as f:
+    #         records = json.load(f)
 
-        detailed_results = pd.DataFrame.from_records(records)
-        save_detailed_results(
-            detailed_results.drop(columns=['idxA', 'idxB']),
-            idxA=detailed_results.idxA.to_list(),
-            idxB=detailed_results.idxB.to_list(),
-            idsA=idsA,
-            idsB=idsB, 
-            out_path=out_dir / f'{name}_detailed_results_{count}'
-        )
+    #     detailed_results = pd.DataFrame.from_records(records)
+    #     save_detailed_results(
+    #         detailed_results.drop(columns=['idxA', 'idxB']),
+    #         idxA=detailed_results.idxA.to_list(),
+    #         idxB=detailed_results.idxB.to_list(),
+    #         idsA=idsA,
+    #         idsB=idsB, 
+    #         out_path=out_dir / f'{name}_detailed_results_{count}'
+    #     )
