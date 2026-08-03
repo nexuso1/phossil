@@ -41,8 +41,8 @@ def compute_similarity_matrix(sequencesA, sequencesB, out_dir, name, max_workers
     with Pool(max_workers) as pool:
         for i, j, result in pool.imap_unordered( task_func, tasks, chunksize=chunk_size):
         
-            result['id_seqA'] = sequencesA[i]
-            result['id_seqB'] = sequencesB[j]
+            result['id_seqA'] = str(sequencesA[i])
+            result['id_seqB'] = str(sequencesB[j])
             
             res_global[i, j] = result['identity_global']
             res_shortest[i, j] = result['identity_shortest']
