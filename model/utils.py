@@ -34,7 +34,7 @@ def get_esm(type='650M', masked_lm=False):
         '650m' : 'facebook/esm2_t33_650M_UR50D',
         '150m' : 'facebook/esm2_t30_150M_UR50D',
         '35m' : 'facebook/esm2_t12_35M_UR50D',
-        '8m' : 'esm2_t6_8M_UR50D',
+        '8m' : 'facebook/esm2_t6_8M_UR50D',
     }
 
     link = type_to_link[type]
