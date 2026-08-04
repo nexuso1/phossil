@@ -14,8 +14,9 @@ from transformers import EsmModel, AutoTokenizer, EsmForMaskedLM, AutoModel, Aut
 import esm  # noqa: F401 -- registers the `esmc` architecture with transformers' Auto classes
 
 
-def get_esm(type, masked_lm=False):
-    if type == '600M-C':
+def get_esm(type='650M', masked_lm=False):
+    type = type.lower()
+    if type == '600m-c':
         repo_id = 'biohub/ESMC-600M'
         model_class = AutoModelForMaskedLM if masked_lm else AutoModel
         model = model_class.from_pretrained(repo_id)
@@ -27,14 +28,17 @@ def get_esm(type, masked_lm=False):
     else:
         model_class = EsmModel
 
-    if type == '3B':
-        model, tokenizer = model_class.from_pretrained('facebook/esm2_t36_3B_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t36_3B_UR50D')
-    elif type == '15B':
-        model, tokenizer = model_class.from_pretrained('facebook/esm2_t48_15B_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t48_15B_UR50D')
-    elif type == '35M':
-        model, tokenizer = model_class.from_pretrained('facebook/esm2_t12_35M_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t12_35M_UR50D')
-    else:
-        model, tokenizer = model_class.from_pretrained('facebook/esm2_t33_650M_UR50D'), AutoTokenizer.from_pretrained('facebook/esm2_t33_650M_UR50D')
+    type_to_link = {
+        '15b' : 'facebook/esm2_t48_15B_UR50D',
+        '3b' : 'facebook/esm2_t36_3B_UR50D',
+        '650m' : 'facebook/esm2_t33_650M_UR50D',
+        '150m' : 'facebook/esm2_t30_150M_UR50D',
+        '35m' : 'facebook/esm2_t12_35M_UR50D',
+        '8m' : 'esm2_t6_8M_UR50D',
+    }
+
+    link = type_to_link[type]
+    model, tokenizer = model_class.from_pretrained(link), AutoTokenizer.from_pretrained(link)
     return model, tokenizer
 
 
