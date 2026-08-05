@@ -449,18 +449,6 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
 
     return model, val_metrics, test_metrics
 
-def get_tokenizer(args):
-    if args.type == '3B' :
-        tokenizer = AutoTokenizer.from_pretrained('facebook/esm2_t36_3B_UR50D')
-    elif type == '15B':
-        tokenizer = AutoTokenizer.from_pretrained('facebook/esm2_t48_15B_UR50D')
-    elif type == '35M':
-        tokenizer = AutoTokenizer.from_pretrained('facebook/esm2_t12_35M_UR50D')
-    else:
-        tokenizer = AutoTokenizer.from_pretrained('facebook/esm2_t33_650M_UR50D')
-
-    return tokenizer
-
 def prepare_model(args, create_model_fn):
     model, tokenizer = create_model_fn(args)
 
