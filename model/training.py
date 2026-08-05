@@ -422,6 +422,8 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
     trainer.fit(training_model, train, dev, ckpt_path=args.checkpoint_path)
     best = torch.load(f'{logdir}/best.ckpt')
     training_model.load_state_dict(best['state_dict'])
+    # Validation metrics of the best checkpoint, meant to be used for model selection
+    val_metrics = trainer.validate(training_model, dev)
     test_metrics = trainer.test(training_model, test)
 
     # Save predictions into a DataFrame
@@ -431,6 +433,7 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
 
     pred_df = pd.DataFrame.from_records(training_model.test_preds, columns=columns)
     pred_df.to_json(f"{logdir}/test_preds_fold_{fold}.json")
+    print(val_metrics)
     print(test_metrics)
     # print(f'Optimal prediction threshold (from validation data): {training_model.optimal_threshold}')
     
@@ -444,7 +447,7 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
     #         test_metrics[0][f'dev_kinase_{k}'] = metric
     #     test_metrics[0]['optimal_dev_kinase_pred_threshold'] = training_model.optimal_threshold
 
-    return model, test_metrics
+    return model, val_metrics, test_metrics
 
 def get_tokenizer(args):
     if args.type == '3B' :
@@ -471,6 +474,7 @@ def handle_metadata(args, n_folds=5):
         meta.data = {'args' : args }
         meta.data['current_fold'] = 0
         meta.data['test_metrics'] = [{} for _ in range(n_folds)]
+        meta.data['val_metrics'] = [{} for _ in range(n_folds)]
         meta.data['frozen_finished'] = [False for _ in range(n_folds)]
         meta.save(args.logdir)
     else:
@@ -485,10 +489,11 @@ def handle_metadata(args, n_folds=5):
             if 'current_fold' not in meta.data:
                 meta.data['current_fold'] = int(par_dir.name[-1])
 
-            metrics = meta.data['test_metrics'] 
-            if len(metrics) < n_folds:
-                for _ in range(n_folds - len(metrics)):
-                    metrics.append({})
+            for metrics_key in ['test_metrics', 'val_metrics']:
+                metrics = meta.data.setdefault(metrics_key, [])
+                if len(metrics) < n_folds:
+                    for _ in range(n_folds - len(metrics)):
+                        metrics.append({})
 
             # Retrieve training args from the existing metadata
             for k, v in meta.data['args'].items():
@@ -515,22 +520,22 @@ def create_metrics(ignore_index):
     
     return step_metrics, epoch_metrics
 
-def compute_averages(meta : Metadata, verbose=True):
+def compute_averages(meta : Metadata, metrics_key='test_metrics', avg_key='test_metric_avg', verbose=True):
     if verbose:
-        print('Overall test metric averages')
+        print(f'Overall {metrics_key} averages')
 
-    buffer = {k : 0 for k in meta.data['test_metrics'][-1].keys()}
-    for fold in range(len(meta.data['test_metrics'])):
-        fold_metrics = meta.data['test_metrics'][fold]
+    buffer = {k : 0 for k in meta.data[metrics_key][-1].keys()}
+    for fold in range(len(meta.data[metrics_key])):
+        fold_metrics = meta.data[metrics_key][fold]
         for k, v in fold_metrics.items():
             buffer[k] += v
 
     for k, v in buffer.items():
-        buffer[k] = v / len(meta.data['test_metrics'])
+        buffer[k] = v / len(meta.data[metrics_key])
         if verbose:
             print(f'mean {k} : {buffer[k]}')
 
-    meta.data['test_metric_avg'] = buffer
+    meta.data[avg_key] = buffer
 
 
 def run_training(args : Namespace, create_model_fn):
@@ -588,10 +593,13 @@ def run_training(args : Namespace, create_model_fn):
         model, tokenizer = prepare_model(args, create_model_fn)
 
         logdir = os.path.join(master_logdir, f'fold_{fold}')
-        model, test_metrics = train_model(args, train, dev, test, model, logdir, fold=fold,
+        model, val_metrics, test_metrics = train_model(args, train, dev, test, model, logdir, fold=fold,
                                                    metadata=meta, master_logdir=master_logdir)
         meta.data['test_metrics'][fold]= test_metrics[0]
+        meta.data['val_metrics'][fold]= val_metrics[0]
 
+        print(f'Validation metrics for fold {fold}')
+        print(meta.data['val_metrics'][fold])
         print(f'Test metrics for fold {fold}')
         print(meta.data['test_metrics'][fold])
 
@@ -603,6 +611,7 @@ def run_training(args : Namespace, create_model_fn):
         meta.save(master_logdir)
     if args.fold is None:
         compute_averages(meta)
+        compute_averages(meta, metrics_key='val_metrics', avg_key='val_metric_avg')
     meta.save(master_logdir)
     return model
 
