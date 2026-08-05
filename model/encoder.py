@@ -11,8 +11,6 @@ from training import run_training, parser, create_loss
 from utils import get_esm
 from dataclasses import dataclass, field
 
-
-
 @dataclass
 class EncoderClassifierConfig(TokenClassifierConfig):
     hidden_size : int = 256

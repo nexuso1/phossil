@@ -12,6 +12,7 @@ torchao
 nglview
 kinase-library
 lightning
+peft
 streamlit
 matplotlib
 scikit-learn

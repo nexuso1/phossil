@@ -10,7 +10,7 @@ from torch.nn import Module
 
 @dataclass
 class SelectiveFinetuningClassifierConfig(TokenClassifierConfig):
-    unfreeze_indices : list[int] = field(default_factory= lambda : [-1])
+    unfreeze_indices : list[int]|str = field(default_factory= lambda : [-1])
     dropout_rate = 0
 
 class SelectiveFinetuningClassifier(TokenClassifier):
@@ -20,7 +20,11 @@ class SelectiveFinetuningClassifier(TokenClassifier):
         self.classifier = torch.nn.Linear(base_hidden_size, config.n_labels)
         self.init_weights(self.classifier)
         self.set_base_requires_grad(False)
-        self.set_indexed_layers_grad(config.unfreeze_indices, True)
+
+        if self.config.unfreeze_indices == 'all':
+            self.set_base_requires_grad(True)
+        else:
+            self.set_indexed_layers_grad(config.unfreeze_indices, True)
 
         # Overrides dropout in the unfrozen base model layers
         self.set_dropout_unfrozen()
@@ -62,7 +66,7 @@ def main(args):
     run_training(args, create_model)
     
 def add_arguments(parser):
-    parser.add_argument('--indices', default="[-1]", help='Indices of base model layers to be unfrozen')
+    parser.add_argument('--indices', default="[-1]", help='Indices of base model layers to be unfrozen. Input "all" to unfreeze the whole base model.')
     
 if __name__ == '__main__':
     add_arguments(parser)
