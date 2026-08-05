@@ -53,20 +53,37 @@ def plot_info(data, path):
 def prune_long_seqs(data : pd.DataFrame, max_length : int = 1023):
     return data[data['sequence'].apply(lambda x: len(x) < max_length)]
 
+def add_chunk_columns(data : pd.DataFrame):
+    """
+    Fills in the columns added by chunk_proteins.py, so that datasets of whole proteins
+    (where every protein is its own parent) go through the same code path.
+    """
+    if 'parent_id' not in data:
+        data['parent_id'] = data['id']
+
+    if 'parent_length' not in data:
+        data['parent_length'] = data['sequence'].apply(len)
+
+    return data
+
 def collapse_fn(group : pd.DataFrame):
     #print(group['sequence'])
     #print(group)
     lens = group['sequence'].apply(lambda x: len(x))
     new_rep = lens.argmax()
-    group['new_rep'] = group.iloc[new_rep].id
+    group['new_rep'] = group.iloc[new_rep].parent_id
     return group
 
 def reassign_representatives(data : pd.DataFrame):
     reps = set(data.cluster_rep.unique())
-    members = set(data.id.unique())
+    members = set(data.parent_id.unique())
 
     # Representatives that are not in the filtered dataset
     missing = set.difference(reps, members)
+    # Chunked datasets keep every protein, so there may be nothing to reassign
+    if not missing:
+        return data
+
     grouped_to_fix = data[data['cluster_rep'].apply(lambda x: x in missing)].groupby('cluster_rep')
     fixed = grouped_to_fix.apply(collapse_fn)
     fixed = fixed.reset_index(level='cluster_rep', drop=True)
@@ -74,8 +91,9 @@ def reassign_representatives(data : pd.DataFrame):
     return data
 
 def compute_length_labels(data):
-    data['length'] = data['sequence'].apply(lambda x: len(x))
-    _, length_bins = np.histogram(data['length'], 10)
+    # Stratify by the length of the whole protein, chunks of one protein are not independent
+    data['length'] = data['parent_length']
+    _, length_bins = np.histogram(data['length'], 10, range=(0, 1000))
     length_labels = np.digitize(data['length'], length_bins)
     data['length_class'] = length_labels
 
@@ -105,37 +123,60 @@ def write_dataset_info(all_splits, out_folder, suffix=''):
 
     pd.DataFrame.from_dict(res).T.to_csv(os.path.join(out_folder, f'dataset_info{suffix}.csv'), sep=',')
 
-def get_kfold_spltis(data : pd.DataFrame, seed=42):
+def get_parent_length_classes(data : pd.DataFrame):
+    """
+    Length class per protein instead of per row. Chunks of one protein are near duplicates of
+    each other, so they have to be split as a unit, otherwise the folds leak into each other.
+    """
+    return data.groupby('parent_id', sort=False)['length_class'].first()
+
+def get_parent_indices(data : pd.DataFrame, parents):
+    """
+    Row indices of all chunks belonging to the given proteins.
+    """
+    return data.index[data['parent_id'].isin(set(parents))].tolist()
+
+def get_kfold_spltis(data : pd.DataFrame, seed=42, train_size=0.8):
     cv = StratifiedKFold(random_state=seed, shuffle=True)
+    parent_classes = get_parent_length_classes(data)
     splits = []
-    for train, test in cv.split(data.index, data['length_class']):
-        orig_indices_train = data.index[train].tolist()
-        orig_indices_test = data.index[test].tolist()
-        splits.append({'train' : orig_indices_train, 'test' : orig_indices_test, 'total' : list(data.index)})
+    for train, test in cv.split(parent_classes.index, parent_classes):
+        # Hold out a dev partition of the train split, over proteins like the rest of the splits.
+        # Same arguments FullProteinDataset.get_fold used when creating the dev set on the fly
+        train_parents, dev_parents = train_test_split(parent_classes.index[train], train_size=train_size,
+                                                      random_state=seed)
+        orig_indices_train = get_parent_indices(data, train_parents)
+        orig_indices_dev = get_parent_indices(data, dev_parents)
+        orig_indices_test = get_parent_indices(data, parent_classes.index[test])
+        splits.append({'train' : orig_indices_train, 'dev' : orig_indices_dev,
+                       'test' : orig_indices_test, 'total' : list(data.index)})
     return splits
 
 def get_release_split(data, dev_size=None, seed=42):
     if not dev_size:
                 raise AssertionError('Dev size not set for release dataset preparation.')
+    parent_classes = get_parent_length_classes(data)
     try:
-        train, dev = train_test_split(data.index, test_size=dev_size, random_state=seed, stratify=data['length_class'])
+        train, dev = train_test_split(parent_classes.index, test_size=dev_size, random_state=seed, stratify=parent_classes)
 
     except ValueError:
-        to_merge = data['length_class'] == data['length_class'].max()
-        print(data['length_class'].max())
-        data.loc[to_merge, 'length_class'] = data['length_class'].max() - 1
-        train, dev = train_test_split(data.index, test_size=dev_size, random_state=seed, stratify=data['length_class'])
+        largest_class = parent_classes.max()
+        print(largest_class)
+        parent_classes[parent_classes == largest_class] = largest_class - 1
+        train, dev = train_test_split(parent_classes.index, test_size=dev_size, random_state=seed, stratify=parent_classes)
 
-    return [{'train' : train.to_list(), 'dev' : dev.to_list(), 'total' : data.index.to_list()}]
+    return [{'train' : get_parent_indices(data, train), 'dev' : get_parent_indices(data, dev),
+             'total' : data.index.to_list()}]
 
-def split_data_per_residue(data : pd.DataFrame, set_labels : list[str], seed=42, release=False, dev_size : float|None =None):
+def split_data_per_residue(data : pd.DataFrame, set_labels : list[str], seed=42, release=False,
+                           dev_size : float|None =None, train_size=0.8):
     total_splits : dict[str, list[dict[str, list[int]]]] = {}
     for label in set_labels:
         filtered = filter_dataset(data, label)
         if release:
             total_splits[label] = get_release_split(data, dev_size, seed)
         else:
-            total_splits[label] = get_kfold_spltis(filtered, seed=seed)
+            total_splits[label] = get_kfold_spltis(filtered, seed=seed, train_size=train_size)
     
     return total_splits
 
@@ -145,11 +186,12 @@ def save_dataset(all_splits, out_folder, suffix=''):
             json.dump(splits, f, indent='\t')
         
 def extract_representatives(data):
-    reps = data['cluster_rep'].unique()
-    rep_mask = data['id'].apply(lambda x : x in reps)
+    reps = set(data['cluster_rep'].unique())
+    rep_mask = data['parent_id'].apply(lambda x : x in reps)
     return data[rep_mask]
 
-def create_splits(prot_info_path, clusters_path, res_sets, out_folder=None, release=False, release_dev_size=0.2):
+def create_splits(prot_info_path, clusters_path, res_sets, out_folder=None, release=False, release_dev_size=0.2,
+                  train_size=0.8, suffix=''):
     prot_info = pd.read_json(prot_info_path)
     clusters = pd.read_csv(clusters_path, sep='\t', names=['cluster_rep', 'cluster_mem'])
 
@@ -157,10 +199,13 @@ def create_splits(prot_info_path, clusters_path, res_sets, out_folder=None, rele
     out_folder = f'../data/dataset_{clusters_name}' if not out_folder else out_folder
     os.makedirs(out_folder, exist_ok=True)
 
+    # Chunked datasets are clustered and split by the protein a chunk came from
+    prot_info = add_chunk_columns(prot_info)
+
     # Join the cluster information with proteins that we have in the prot info
     # Some proteins from prot_info may have representatives that are not inside prot_info,
     # or they might be longer than max length for the base PLM
-    joined = prot_info.join(clusters.set_index('cluster_mem'), on='id', how='left').drop_duplicates('id')
+    joined = prot_info.join(clusters.set_index('cluster_mem'), on='parent_id', how='left').drop_duplicates('id')
     joined = prune_long_seqs(joined)
 
     # Find the longest member of the cluster that is inside prot_info, and assign it as the representative
@@ -181,23 +226,27 @@ def create_splits(prot_info_path, clusters_path, res_sets, out_folder=None, rele
     joined = compute_length_labels(joined)
 
     # Split data into folds using stratified k-fold cross-validation, or just train-dev if release dataset
-    all_splits = split_data_per_residue(joined, set_labels, release=release, dev_size=release_dev_size)
-    suffix = '_release' if release else ''
+    all_splits = split_data_per_residue(joined, set_labels, release=release, dev_size=release_dev_size,
+                                        train_size=train_size)
+    
     write_dataset_info(all_splits, out_folder, suffix=suffix)
     save_dataset(all_splits, out_folder, suffix=suffix)
 
 def main(args):
     res_sets = eval(args.res_sets)
-    create_splits(args.prot_info, args.clusters, res_sets, release=args.release, out_folder=args.out_folder, 
-                  release_dev_size=args.release_dev_size)
+    create_splits(args.prot_info, args.clusters, res_sets, release=args.release, out_folder=args.out_folder,
+                  release_dev_size=args.release_dev_size, train_size=args.train_size, suffix=args.suffix)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--prot_info', type=str, default='../data/dbptm/dbptm_info.json')
     parser.add_argument('--clusters', type=str, default='../data/dbptm/dbptm_clusters.tsv')
     parser.add_argument('--res_sets', type=str, default="[{'S'}, {'T'}, {'Y'}, {'S', 'T'}, {'S', 'T', 'Y'}]")
-    parser.add_argument('--release', action='store_true', default=True)
+    parser.add_argument('--release', action='store_true')
     parser.add_argument('--out_folder', type=str, help='Output folder', default='../data/dbptm')
     parser.add_argument('--release_dev_size', type=float, help='Release dataset dev size', default=0.2)
+    parser.add_argument('--suffix', type=str, help='Suffix for the splits filename.', default='')
+    parser.add_argument('--train_size', type=float, default=0.8,
+                        help='Fraction of the train partition of each fold kept for training, the rest becomes the dev partition.')
     args = parser.parse_args()
     main(args)

@@ -46,12 +46,15 @@ def load_prot_data(dataset_path, residues={'S', 'T', 'Y'}, ignore_index=-1, kina
     else:
         labels = df.apply(partial(labeling_fn, residues=residues, ignore_index=ignore_index), axis=1)
 
-    df['label'] = labels    
+    df['label'] = labels
+    columns = ['id', 'sequence', 'label']
+    # Chunked datasets carry the protein a chunk came from, needed to map predictions back onto it
+    columns += [column for column in ['parent_id', 'offset'] if column in df]
     if kinases:
         df = df.assign(kinase_labels=kinase_labels)
-        return df[['id', 'sequence', 'label', 'kinase_labels']]
+        return df[columns + ['kinase_labels']]
 
-    return df[['id', 'sequence', 'label']]
+    return df[columns]
 
 def generate_random_residues(num_samples, residue_id_mapping):
     if num_samples == 0:
@@ -145,6 +148,59 @@ def perturb_batch(
     masked_input_ids[modified & (choices == 2)] = generate_sm_residues(masked_input_ids[modified & (choices == 2)], esm_to_sm_id_mapping).to(masked_input_ids.dtype)
 
     return masked_input_ids
+
+def stitch_chunk_predictions(pred_df : pd.DataFrame, chunk_info : pd.DataFrame):
+    """
+    Maps chunk level predictions back onto whole proteins.
+
+    Chunk positions are shifted by the chunk offset, and a position covered by several overlapping
+    chunks keeps the prediction of the chunk that saw it closest to its center, which is the chunk
+    that had the most context on both sides of it.
+
+    "chunk_info" is the dataframe of the dataset the predictions were made on, indexed positionally
+    by the 'df_index' column of pred_df. Datasets of whole proteins are handled as well, there every
+    protein is simply its own single chunk.
+
+    Returns a dataframe with one row per protein, with 0-based positions into the whole protein.
+    """
+    has_kinases = 'kinase_logits' in pred_df
+    chunked = 'parent_id' in chunk_info
+
+    proteins = {}
+    for pred in pred_df.itertuples():
+        chunk = chunk_info.iloc[pred.df_index]
+        offset = int(chunk['offset']) if chunked else 0
+        # Distance from the chunk center, used to pick between overlapping predictions
+        center = (len(chunk['sequence']) - 1) / 2
+        positions = proteins.setdefault(chunk['parent_id'] if chunked else chunk['id'], {})
+
+        for i, position in enumerate(pred.sequence_indices):
+            distance = abs(int(position) - center)
+            best = positions.get(int(position) + offset)
+            if best is not None and best[0] <= distance:
+                continue
+
+            values = (distance, pred.logits[i], pred.labels[i])
+            if has_kinases:
+                values = values + (pred.kinase_logits[i],)
+
+            positions[int(position) + offset] = values
+
+    records = []
+    for protein_id, positions in proteins.items():
+        ordered = sorted(positions.items())
+        record = {
+            'id' : protein_id,
+            'logits' : [values[1] for _, values in ordered],
+            'labels' : [values[2] for _, values in ordered],
+            'sequence_indices' : [position for position, _ in ordered],
+        }
+        if has_kinases:
+            record['kinase_logits'] = [values[3] for _, values in ordered]
+
+        records.append(record)
+
+    return pd.DataFrame.from_records(records)
 
 def prep_batch(data, tokenizer, modify_prob=0, mask_prob=0.7, rand_prob=0.15, sub_prob=0.15, ignore_label=-1, kinases=False):
     """

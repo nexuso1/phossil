@@ -22,7 +22,7 @@ from token_classifier_base import TokenClassifier
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, Callback
 from utils import Metadata, sigmoid_focal_loss
 from lightning.pytorch.loggers import TensorBoardLogger
-from data_loading import prepare_datasets, prepare_full_dataset
+from data_loading import prepare_datasets, prepare_full_dataset, stitch_chunk_predictions
 from transformers import AutoTokenizer
 from pathlib import Path
 from argparse import Namespace, ArgumentParser
@@ -433,6 +433,13 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
 
     pred_df = pd.DataFrame.from_records(training_model.test_preds, columns=columns)
     pred_df.to_json(f"{logdir}/test_preds_fold_{fold}.json")
+
+    # Predictions per whole protein. On chunked datasets the chunk level metrics above count the
+    # positions shared by overlapping chunks twice, the stitched ones count every position once.
+    stitched_df = stitch_chunk_predictions(pred_df, test.dataset.data)
+    stitched_df.to_json(f"{logdir}/test_preds_fold_{fold}_stitched.json")
+    test_metrics[0].update(compute_stitched_metrics(stitched_df, args.ignore_label))
+
     print(val_metrics)
     print(test_metrics)
     # print(f'Optimal prediction threshold (from validation data): {training_model.optimal_threshold}')
@@ -508,6 +515,20 @@ def create_metrics(ignore_index):
     
     return step_metrics, epoch_metrics
 
+def compute_stitched_metrics(stitched_df : pd.DataFrame, ignore_index, prefix='stitched_test_'):
+    """
+    Recomputes the test metrics over whole protein predictions, so that positions covered by
+    several overlapping chunks are counted once instead of once per chunk.
+    """
+    _, metrics = create_metrics(ignore_index)
+    metrics = metrics.clone(prefix=prefix)
+
+    logits = torch.as_tensor([value for values in stitched_df['logits'] for value in values], dtype=torch.float32)
+    labels = torch.as_tensor([value for values in stitched_df['labels'] for value in values], dtype=torch.float32)
+    metrics.update(logits, labels.int())
+
+    return {name : float(value) for name, value in metrics.compute().items()}
+
 def compute_averages(meta : Metadata, metrics_key='test_metrics', avg_key='test_metric_avg', verbose=True):
     if verbose:
         print(f'Overall {metrics_key} averages')
@@ -525,7 +546,6 @@ def compute_averages(meta : Metadata, metrics_key='test_metrics', avg_key='test_
 
     meta.data[avg_key] = buffer
 
-
 def run_training(args : Namespace, create_model_fn):
     if args.release:
         run_release_training(args, create_model_fn)
@@ -541,7 +561,6 @@ def run_training(args : Namespace, create_model_fn):
     args.logdir = os.path.join("new_logs", log_dirname)
 
     meta = handle_metadata(args)
-    tokenizer = get_tokenizer(args)
     full_dataset = prepare_datasets(args, ignore_label=args.ignore_label)
 
 
@@ -558,7 +577,7 @@ def run_training(args : Namespace, create_model_fn):
 
         print(f'Current fold: {fold}')
         train_ds, dev_ds, test_ds = full_dataset.get_fold(fold)
-        
+        model, tokenizer = prepare_model(args, create_model_fn)
         train = DataLoader(train_ds, args.batch_size, shuffle=True,
                             collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label,
                                                modify_prob=args.modify_prob, mask_prob=args.mask_prob, rand_prob=args.rand_prob,
@@ -578,7 +597,7 @@ def run_training(args : Namespace, create_model_fn):
                             persistent_workers=True if args.num_workers > 0 else False,
                             num_workers=args.num_workers)
         
-        model, tokenizer = prepare_model(args, create_model_fn)
+        
 
         logdir = os.path.join(master_logdir, f'fold_{fold}')
         model, val_metrics, test_metrics = train_model(args, train, dev, test, model, logdir, fold=fold,
@@ -614,8 +633,7 @@ def run_release_training(args, create_model_fn):
 
     args.logdir = os.path.join("new_logs", log_dirname)
 
-    meta = handle_metadata(args)
-    tokenizer = get_tokenizer(args)
+    meta = handle_metadata(args)    
     full_dataset = prepare_full_dataset(args, ignore_label=args.ignore_label)
     step_metrics, epoch_metrics = create_metrics(args.ignore_label)
 
