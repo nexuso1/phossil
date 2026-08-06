@@ -4,9 +4,6 @@ import matplotlib.pyplot as plt
 from matplotlib import colormaps
 from pathlib import Path
 from sklearn.model_selection import StratifiedKFold, train_test_split
-from Bio.SeqRecord import SeqRecord
-from Bio.Seq import Seq
-from Bio import SeqIO
 import numpy as np
 import os
 import json
@@ -123,6 +120,33 @@ def write_dataset_info(all_splits, out_folder, suffix=''):
 
     pd.DataFrame.from_dict(res).T.to_csv(os.path.join(out_folder, f'dataset_info{suffix}.csv'), sep=',')
 
+def write_site_increase(data : pd.DataFrame, set_labels : list[str], out_folder, suffix=''):
+    """
+    Records how many sites picking the best annotated member of every cluster as its representative
+    gains over the representatives assigned by the clustering, for each residue set.
+    """
+    res = {}
+    for label in set_labels:
+        filtered = filter_dataset(data, label)
+        sites_column = f'{label}_sites'
+        default = get_representatives(filtered, label)
+        max_site = get_representatives(filtered, label, max_site_reps=True)
+
+        default_sites = count_unique_sites(default, sites_column)
+        max_sites = count_unique_sites(max_site, sites_column)
+        res[label] = {
+            # Clusters whose assigned representative has no site of this residue set are lost
+            # entirely by the default selection, the max site one keeps them
+            'default_proteins' : default['parent_id'].nunique(),
+            'max_proteins' : max_site['parent_id'].nunique(),
+            'default_sites' : default_sites,
+            'max_sites' : max_sites,
+            'site_increase' : max_sites - default_sites,
+            'relative_increase' : (max_sites - default_sites) / default_sites if default_sites else 0,
+        }
+
+    pd.DataFrame.from_dict(res).T.to_csv(os.path.join(out_folder, f'site_increase{suffix}.csv'), sep=',')
+
 def get_parent_length_classes(data : pd.DataFrame):
     """
     Length class per protein instead of per row. Chunks of one protein are near duplicates of
@@ -136,7 +160,7 @@ def get_parent_indices(data : pd.DataFrame, parents):
     """
     return data.index[data['parent_id'].isin(set(parents))].tolist()
 
-def get_kfold_spltis(data : pd.DataFrame, seed=42, train_size=0.8):
+def get_kfold_splits(data : pd.DataFrame, seed=42, train_size=0.8):
     cv = StratifiedKFold(random_state=seed, shuffle=True)
     parent_classes = get_parent_length_classes(data)
     splits = []
@@ -169,14 +193,17 @@ def get_release_split(data, dev_size=None, seed=42):
              'total' : data.index.to_list()}]
 
 def split_data_per_residue(data : pd.DataFrame, set_labels : list[str], seed=42, release=False,
-                           dev_size : float|None =None, train_size=0.8):
+                           dev_size : float|None =None, train_size=0.8, max_site_reps=False):
     total_splits : dict[str, list[dict[str, list[int]]]] = {}
     for label in set_labels:
         filtered = filter_dataset(data, label)
+
+        # Use only cluster representatives going forward
+        filtered = get_representatives(filtered, label, max_site_reps=max_site_reps)
         if release:
             total_splits[label] = get_release_split(data, dev_size, seed)
         else:
-            total_splits[label] = get_kfold_spltis(filtered, seed=seed, train_size=train_size)
+            total_splits[label] = get_kfold_splits(filtered, seed=seed, train_size=train_size)
     
     return total_splits
 
@@ -189,6 +216,59 @@ def extract_representatives(data):
     reps = set(data['cluster_rep'].unique())
     rep_mask = data['parent_id'].apply(lambda x : x in reps)
     return data[rep_mask]
+
+def get_representatives(data : pd.DataFrame, set_label : str, max_site_reps=False):
+    """
+    Cluster representatives of the dataset, either the ones assigned by the clustering, or the
+    member of each cluster carrying the most sites of the given residue set.
+    """
+    if max_site_reps:
+        return extract_max_site_representatives(data, sites_column=f'{set_label}_sites')
+
+    return extract_representatives(data)
+
+def get_protein_sites(data : pd.DataFrame, sites_column='sites'):
+    """
+    Sites of every row, shifted onto the protein the row came from. Chunk sites are chunk local
+    and overlapping chunks repeat the sites they share, shifting is what tells those apart.
+    """
+    offsets = data['offset'] if 'offset' in data else pd.Series(0, index=data.index)
+    return [{site + offset for site in sites} for sites, offset in zip(data[sites_column], offsets)]
+
+def count_unique_sites(data : pd.DataFrame, sites_column='sites'):
+    """
+    Number of distinct sites in the data, counting a site shared by overlapping chunks once.
+    """
+    per_protein = {}
+    for parent_id, sites in zip(data['parent_id'], get_protein_sites(data, sites_column)):
+        per_protein.setdefault(parent_id, set()).update(sites)
+
+    return sum(len(sites) for sites in per_protein.values())
+
+def extract_max_site_representatives(data : pd.DataFrame, sites_column='sites'):
+    """
+    Picks the protein with the most sites in each cluster as its representative, and returns the
+    rows of the chosen proteins.
+
+    Expects "sites_column" to hold only the sites relevant for the dataset being created. Sites of
+    a chunked protein are counted over all of its chunks, without counting the ones its overlapping
+    chunks have in common twice.
+    """
+    per_protein = pd.DataFrame({
+        'cluster_rep' : data['cluster_rep'].to_numpy(),
+        'parent_id' : data['parent_id'].to_numpy(),
+        'parent_length' : data['parent_length'].to_numpy(),
+        'sites' : get_protein_sites(data, sites_column),
+    }).groupby(['cluster_rep', 'parent_id'], sort=False).agg(
+        n_sites=('sites', lambda chunks: len(set().union(*chunks))),
+        length=('parent_length', 'first')).reset_index()
+
+    # Sorted, so that ties between equally annotated proteins are broken by the longer sequence,
+    # and always the same way no matter the order of the rows
+    per_protein = per_protein.sort_values(['n_sites', 'length', 'parent_id'], ascending=[False, False, True])
+    representatives = per_protein.groupby('cluster_rep', sort=False)['parent_id'].first()
+
+    return data[data['parent_id'].isin(set(representatives))]
 
 def create_splits(prot_info_path, clusters_path, res_sets, out_folder=None, release=False, release_dev_size=0.2,
                   train_size=0.8, suffix=''):
@@ -212,11 +292,9 @@ def create_splits(prot_info_path, clusters_path, res_sets, out_folder=None, rele
     joined = reassign_representatives(joined)
 
     # Plot cluster size distribution
-    plot_name = 'cluster_dist.png'
-    plot_info(joined, os.path.join(out_folder, plot_name))
+    # plot_name = 'cluster_dist.png'
+    # plot_info(joined, os.path.join(out_folder, plot_name))
 
-    # Use only cluster representatives going forward
-    joined = extract_representatives(joined)
 
     # Split sites according to residues in res_sets
     set_labels = ["".join(sorted(list(res_set))) for res_set in res_sets]
@@ -228,9 +306,20 @@ def create_splits(prot_info_path, clusters_path, res_sets, out_folder=None, rele
     # Split data into folds using stratified k-fold cross-validation, or just train-dev if release dataset
     all_splits = split_data_per_residue(joined, set_labels, release=release, dev_size=release_dev_size,
                                         train_size=train_size)
-    
+
+
     write_dataset_info(all_splits, out_folder, suffix=suffix)
     save_dataset(all_splits, out_folder, suffix=suffix)
+
+    # The same splits, but built from the best annotated member of each cluster instead of the
+    # representative the clustering assigned
+    max_splits = split_data_per_residue(joined, set_labels, release=release, dev_size=release_dev_size,
+                                        train_size=train_size, max_site_reps=True)
+
+    write_dataset_info(max_splits, out_folder, suffix=f'{suffix}_max')
+    save_dataset(max_splits, out_folder, suffix=f'{suffix}_max')
+
+    write_site_increase(joined, set_labels, out_folder, suffix=suffix)
 
 def main(args):
     res_sets = eval(args.res_sets)
@@ -239,7 +328,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--prot_info', type=str, default='../data/dbptm/dbptm_info.json')
+    parser.add_argument('--prot_info', type=str, default='../data/dbptm/dbptm_info_chunked.json')
     parser.add_argument('--clusters', type=str, default='../data/dbptm/dbptm_clusters.tsv')
     parser.add_argument('--res_sets', type=str, default="[{'S'}, {'T'}, {'Y'}, {'S', 'T'}, {'S', 'T', 'Y'}]")
     parser.add_argument('--release', action='store_true')
