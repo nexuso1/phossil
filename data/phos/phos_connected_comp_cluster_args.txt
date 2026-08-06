@@ -1,0 +1,1 @@
+--min-seq-id 0.3 -c 0 --cov-mode 1 --cluster-mode 1 --alignment-mode 3 -s 6 --single-step-clustering
