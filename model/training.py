@@ -94,6 +94,8 @@ class LightningWrapper(L.LightningModule):
         
         self.loss_metric = MeanMetric()
         self.test_preds = []
+        self.val_preds = []
+        self.save_val_preds = False
         # self.optimal_threshold = 0
         # self.optimal_dev_metric_values = {
         #     'f1' : 0,
@@ -146,19 +148,10 @@ class LightningWrapper(L.LightningModule):
             
         return loss, logits, outputs
     
-    def validation_step(self, batch, batch_idx):
-        self._eval_step(batch, batch_idx, 'val')
-    
-    def test_step(self, batch, batch_idx):
-        loss, logits, outputs = self._eval_step(batch, batch_idx, 'test')
-
-        #self.optimum_metrics.update(logits.view(-1), batch['labels'].view(-1))
-        # if self.predicting_kinases:
-        #     self.optimum_kinase_metrics.update(outputs['kinase_logits'][batch['labels'] == 1].view(-1), batch['kinase_labels'].view(-1))
-
+    def _save_predictions(self, batch, logits, outputs, predictions : list):
         # Relevant positions mask
         mask = batch['labels'] != -1
-        # Save test predictions
+        # Save predictions of one batch
         for i in range(mask.shape[0]):
             preds = (logits[i][mask[i]].cpu().numpy().reshape(-1), # prediction logits
                                     batch['labels'][i][mask[i]].cpu().numpy().reshape(-1), # labels
@@ -167,7 +160,20 @@ class LightningWrapper(L.LightningModule):
             if self.predicting_kinases:
                 preds = preds + (outputs['kinase_logits'][i][mask[i]].cpu().numpy(),)
 
-            self.test_preds.append(preds) # index into the test set
+            predictions.append(preds) # index into the evaluated set
+
+    def validation_step(self, batch, batch_idx):
+        loss, logits, outputs = self._eval_step(batch, batch_idx, 'val')
+
+        # Only collected during the explicit validation run of the best checkpoint, collecting them
+        # in every epoch of the training loop would just be thrown away
+        if self.save_val_preds:
+            self._save_predictions(batch, logits, outputs, self.val_preds)
+
+    def test_step(self, batch, batch_idx):
+        loss, logits, outputs = self._eval_step(batch, batch_idx, 'test')
+
+        self._save_predictions(batch, logits, outputs, self.test_preds)
 
     def _shared_epoch_start(self, type):
 
@@ -179,21 +185,11 @@ class LightningWrapper(L.LightningModule):
                 self.__getattr__(f'{type}_kinase_{m_type}_metrics').reset()
 
     def on_validation_epoch_start(self):
+        # Keep only the predictions of the current validation run
+        self.val_preds = []
         self._shared_epoch_start('val')
 
     def on_test_epoch_start(self):
-        # self.optimum_metrics = MetricCollection({
-        #         'optimum_f1' : F1Score('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
-        #         'optimum_recall' : Recall('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
-        #         'optimum_precision' : Precision('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
-        #         'optimum_mcc' : MatthewsCorrCoef('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
-        #         'optimum_confusion_matrix' : ConfusionMatrix('binary', threshold=self.optimal_threshold, ignore_index=self.classifier.ignore_index),
-        #     }
-        # ).to(device=self.device)
-    
-        # if self.predicting_kinases:
-        #     self.optimum_kinase_metrics = self.optimum_metrics.clone('kinase_')
-        
         self._shared_epoch_start('test')
 
     def on_train_epoch_start(self):
@@ -423,6 +419,7 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
     best = torch.load(f'{logdir}/best.ckpt')
     training_model.load_state_dict(best['state_dict'])
     # Validation metrics of the best checkpoint, meant to be used for model selection
+    training_model.save_val_preds = True
     val_metrics = trainer.validate(training_model, dev)
     test_metrics = trainer.test(training_model, test)
 
@@ -431,28 +428,13 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
     if args.kinase:
         columns += ['kinase_logits']
 
-    pred_df = pd.DataFrame.from_records(training_model.test_preds, columns=columns)
-    pred_df.to_json(f"{logdir}/test_preds_fold_{fold}.json")
-
-    # Predictions per whole protein. On chunked datasets the chunk level metrics above count the
-    # positions shared by overlapping chunks twice, the stitched ones count every position once.
-    stitched_df = stitch_chunk_predictions(pred_df, test.dataset.data)
-    stitched_df.to_json(f"{logdir}/test_preds_fold_{fold}_stitched.json")
-    test_metrics[0].update(compute_stitched_metrics(stitched_df, args.ignore_label))
+    val_metrics[0].update(save_predictions(training_model.val_preds, columns, dev.dataset.data, logdir,
+                                           f'val_preds_fold_{fold}', args.ignore_label, prefix='stitched_val_'))
+    test_metrics[0].update(save_predictions(training_model.test_preds, columns, test.dataset.data, logdir,
+                                            f'test_preds_fold_{fold}', args.ignore_label, prefix='stitched_test_'))
 
     print(val_metrics)
     print(test_metrics)
-    # print(f'Optimal prediction threshold (from validation data): {training_model.optimal_threshold}')
-    
-    # test_metrics[0]['optimal_dev_pred_threshold'] = training_model.optimal_threshold
-    # for k, metric in training_model.optimal_dev_metric_values.items():
-    #     test_metrics[0][f'dev_{k}'] = metric
-
-    # if args.kinase:
-    #     print(f'Optimal kinase prediction threshold (from validation data): {training_model.optimal_kinase_threshold}')
-    #     for k, metric in training_model.optimal_kinase_dev_metric_values.items():
-    #         test_metrics[0][f'dev_kinase_{k}'] = metric
-    #     test_metrics[0]['optimal_dev_kinase_pred_threshold'] = training_model.optimal_threshold
 
     return model, val_metrics, test_metrics
 
@@ -514,6 +496,21 @@ def create_metrics(ignore_index):
     })
     
     return step_metrics, epoch_metrics
+
+def save_predictions(preds, columns, dataset : pd.DataFrame, logdir, name, ignore_index, prefix):
+    """
+    Saves the predictions of one evaluated set, both per chunk ("<name>.json") and per whole protein
+    ("<name>_stitched.json"). Returns the metrics recomputed over the whole protein predictions.
+    """
+    pred_df = pd.DataFrame.from_records(preds, columns=columns)
+    pred_df.to_json(f'{logdir}/{name}.json')
+
+    # On chunked datasets the chunk level metrics count the positions shared by overlapping chunks
+    # twice, the stitched ones count every position once.
+    stitched_df = stitch_chunk_predictions(pred_df, dataset)
+    stitched_df.to_json(f'{logdir}/{name}_stitched.json')
+
+    return compute_stitched_metrics(stitched_df, ignore_index, prefix=prefix)
 
 def compute_stitched_metrics(stitched_df : pd.DataFrame, ignore_index, prefix='stitched_test_'):
     """
