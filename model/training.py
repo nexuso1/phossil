@@ -438,8 +438,24 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
 
     return model, val_metrics, test_metrics
 
+def compile_model(model : TokenClassifier):
+    """
+    Compiles the base model, which holds nearly all of the compute.
+
+    The bound forward is compiled instead of wrapping the module, so that the state dict keys stay
+    the same as in an uncompiled run and checkpoints remain interchangeable between the two.
+    """
+    # Sequences are padded to the longest one in the batch, so the input shape changes from batch
+    # to batch and the graph has to be compiled for dynamic shapes
+    model.base.forward = torch.compile(model.base.forward, dynamic=True)
+
+    return model
+
 def prepare_model(args, create_model_fn):
     model, tokenizer = create_model_fn(args)
+
+    if args.compile:
+        model = compile_model(model)
 
     return model, tokenizer
 
