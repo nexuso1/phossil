@@ -6,8 +6,7 @@ job_script=$2
 dataset=$3
 splits_suffix=$4
 type=$5
-
-data_dir=/storage/brno12-cerit/home/nexuso1/phossil/data
+data_dir=$6
 
 echo "$dataset"
 

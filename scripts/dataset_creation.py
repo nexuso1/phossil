@@ -201,7 +201,7 @@ def split_data_per_residue(data : pd.DataFrame, set_labels : list[str], seed=42,
         # Use only cluster representatives going forward
         filtered = get_representatives(filtered, label, max_site_reps=max_site_reps)
         if release:
-            total_splits[label] = get_release_split(data, dev_size, seed)
+            total_splits[label] = get_release_split(filtered, dev_size, seed)
         else:
             total_splits[label] = get_kfold_splits(filtered, seed=seed, train_size=train_size)
     
