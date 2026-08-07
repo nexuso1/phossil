@@ -617,7 +617,6 @@ def run_training(args : Namespace, create_model_fn):
         compute_averages(meta)
         compute_averages(meta, metrics_key='val_metrics', avg_key='val_metric_avg')
     meta.save(master_logdir)
-    return model
 
 
 def run_release_training(args, create_model_fn):
