@@ -3,8 +3,6 @@
 
 import torch
 import torch.nn as nn
-import lora
-import re
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -12,7 +10,6 @@ from typing import Callable
 class TokenClassifierConfig:
     n_labels : int
     loss : Callable[[torch.Tensor], torch.Tensor]
-    lora_config : lora.MultiPurposeLoRAConfig | None = None
     unfreeze_indices : list[int] = field(default_factory=lambda : [])
     apply_lora : bool = False
     dropout_rate : float = 0
@@ -56,19 +53,6 @@ class TokenClassifier(nn.Module):
         saved_model = torch.load(path)
         self.load_state_dict(saved_model['state_dict'])
         self.config = saved_model['config']
-
-    def apply_lora(self, config=lora.MultiPurposeLoRAConfig(rank=256)):
-        self.lora_config = config
-        self.base = lora.modify_with_lora(self.base, self.lora_config)
-
-        # Freeze base model parameters, except LoRA
-        self.set_base_requires_grad(False)     
-
-        for (param_name, param) in self.base.named_parameters():
-                if re.fullmatch(self.lora_config.trainable_param_names, param_name):
-                    param.requires_grad = True
-
-        print('LoRA applied.')
     
     def init_weights(self, module):
         for param in module.parameters():
@@ -105,7 +89,8 @@ class TokenClassifier(nn.Module):
     def set_indexed_layers_grad(self, indices : list[int], req_grad_value : bool):
         indices = set(indices)
         self.modified_indices = indices
-        param_list = list(self.base.encoder.layer.named_children())
+        root = self.base.encoder.layer if 'encoder' in [n for n, _ in self.base.named_children()] else self.base.transformer.blocks
+        param_list = list(root.named_children())
         for i in indices:
             # index 0 contains the name, 1 the parameter
             for param in param_list[i][1].parameters():
