@@ -683,7 +683,7 @@ def train_release_model(args, logdir, model, train, dev=None):
                         deterministic=True, log_every_n_steps=1,  accumulate_grad_batches=args.accum, strategy=strategy,
                         default_root_dir=logdir)
     trainer.fit(model, train, dev, ckpt_path=args.checkpoint_path)
-    best = torch.load(f'{logdir}/best.ckpt')
+    best = torch.load(f'{logdir}/best.ckpt', weights_only=False)
     model.load_state_dict(best['state_dict'])
     final_metrics = trainer.test(model, dev)
 
