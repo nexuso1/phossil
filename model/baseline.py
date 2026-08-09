@@ -9,7 +9,8 @@ class BaselineClassifier(TokenClassifier):
     """
     def __init__(self, config, base_model):
         super().__init__(config, base_model)
-        self.classifier = torch.nn.Linear(base_model.config.hidden_size, config.n_labels)
+        base_hidden_size = base_model.config.hidden_size if 'hidden_size' in base_model.config else base_model.config.d_model
+        self.classifier = torch.nn.Linear(base_hidden_size, config.n_labels)
         self.init_weights(self.classifier)
         self.set_base_requires_grad(False)
         self.base.eval()
