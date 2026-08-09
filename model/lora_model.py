@@ -96,6 +96,8 @@ def create_model(args):
     return model, tokenizer
 
 def main(args):
+    if args.hpc:
+        torch.set_float32_matmul_precision('high')
     run_training(args, create_model)
 
 def add_arguments(parser):
@@ -106,6 +108,7 @@ def add_arguments(parser):
                         help='Base model modules to apply LoRA to. Defaults to the attention projections of the given model type.')
     parser.add_argument('--no_rslora', action='store_true', default=False,
                         help='Disable rank stabilized LoRA, scaling the adapters by alpha/rank instead of alpha/sqrt(rank).')
+    parser.add_argument('--hpc', action='store_true', help='Use torch.set_float32_matmul_precision on gpus with tensor cores')
 
 if __name__ == '__main__':
     add_arguments(parser)
