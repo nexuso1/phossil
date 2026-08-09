@@ -70,6 +70,7 @@ parser.add_argument('--fix_decay', action='store_true', help="Do not apply weigh
 parser.add_argument('--kinase', action='store_true', help='Use kinase labels in prediction')
 parser.add_argument('--unfreeze_indices', type=str, default="[]", help="Indices of base model layers to unfreeze")
 parser.add_argument('--fold', type=int, default=None, help='Train only this fold index. Leave None for default all-fold training')
+parser.add_argument('--hpc', action='store_true', help='Use torch.set_float32_matmul_precision on gpus with tensor cores')
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -560,10 +561,13 @@ def compute_averages(meta : Metadata, metrics_key='test_metrics', avg_key='test_
     meta.data[avg_key] = buffer
 
 def run_training(args : Namespace, create_model_fn):
+    if args.hpc:
+            torch.set_float32_matmul_precision('high')
+
     if args.release:
         run_release_training(args, create_model_fn)
         return
-    
+
     L.seed_everything(args.seed)
 
     log_dirname = args.o if args.o else "{}_{}".format(
