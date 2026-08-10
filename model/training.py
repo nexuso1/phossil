@@ -591,7 +591,7 @@ def run_training(args : Namespace, create_model_fn):
     if args.fold is not None:
         # Single fold training
         if meta.data['fold_finished'][args.fold]:
-            print(f'Training for fold {fold} already finished.')
+            print(f'Training for fold {args.fold} already finished.')
             return
 
         start, end = args.fold, args.fold + 1
