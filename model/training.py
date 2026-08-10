@@ -470,6 +470,7 @@ def handle_metadata(args, n_folds=5):
         meta.data['test_metrics'] = [{} for _ in range(n_folds)]
         meta.data['val_metrics'] = [{} for _ in range(n_folds)]
         meta.data['frozen_finished'] = [False for _ in range(n_folds)]
+        meta.data['fold_finished'] = [False for _ in range(n_folds)]
         meta.save(args.logdir)
     else:
         # Parse info from the metadata file
@@ -483,6 +484,10 @@ def handle_metadata(args, n_folds=5):
             if 'current_fold' not in meta.data:
                 meta.data['current_fold'] = int(par_dir.name[-1])
 
+            if 'fold_finised' not in meta.data:
+                meta.data['fold_finished'] = [False for _ in range(n_folds)]
+                for i in range(0, meta.data['current_fold']):
+                    meta.data['fold_finished'][i] = True
             for metrics_key in ['test_metrics', 'val_metrics']:
                 metrics = meta.data.setdefault(metrics_key, [])
                 if len(metrics) < n_folds:
@@ -585,6 +590,10 @@ def run_training(args : Namespace, create_model_fn):
 
     if args.fold is not None:
         # Single fold training
+        if meta.data['fold_finished'][args.fold]:
+            print(f'Training for fold {fold} already finished.')
+            return
+
         start, end = args.fold, args.fold + 1
 
     else:
@@ -628,6 +637,7 @@ def run_training(args : Namespace, create_model_fn):
         print(meta.data['test_metrics'][fold])
 
         meta.data['current_fold'] = fold + 1
+        meta.data['fold_finished'][fold] = True
 
         if args.checkpoint_path:
             # Clear the checkpoint after resuming
