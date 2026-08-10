@@ -66,6 +66,7 @@ while [[ $# -gt 0 ]]; do
         --job_script) job_script="$value" ;;
         --dataset) dataset="$value" ;;
         --splits_suffix) splits_suffix="$value" ;;
+        --pos_weight) pos_weight="$value" ;;
         --type) type="$value" ;;
         --data_dir) data_dir="$value" ;;
         --name) name="$value" ;;
@@ -106,7 +107,7 @@ fi
 declare -A prot_info
 prot_info=( ["dbptm"]="$data_dir"/dbptm/dbptm_info_chunked.json ["phos"]="$data_dir"/phosphosite_sequences/phosphosite_df_chunked.json ["deeppsp"]="$data_dir"/deeppsp/dpsp_info_"${residues[$index]}"_chunked.json )
 declare -A suffix
-suffix=( ["dbptm"]=dbptm"$splits_suffix" ["phos"]=phos"$splits_suffix" ["deeppsp"]=dpsp"$splits_suffix" )
+suffix="$dataset""$splits_suffix"
 
 if [[ -z "${prot_info[$dataset]+set}" ]]; then
     echo "Unknown dataset '$dataset', has to be one of: ${!prot_info[*]}" >&2
@@ -144,8 +145,9 @@ find_checkpoint() {
 }
 
 checkpoint_path=""
+out_dirname="$name"_"${residues[$index]}"_"$pos_weight"_"$type"_"$suffix"
 if [[ -n "$name" ]]; then
-    out_dirname="$name"_"${residues[$index]}"_"$type"_"${suffix[$dataset]}"
+    
     checkpoint_path="$(find_checkpoint "$out_dirname")"
     echo "Run directory: $log_dir/$out_dirname"
 fi
@@ -155,5 +157,5 @@ if [[ -n "$checkpoint_path" ]]; then
     python "$job_script" --checkpoint_path="$checkpoint_path"
 else
     echo "launching $job_script with index $index, residues ${residues[$index]}, splits path: $splits_path prot info: ${prot_info[$dataset]} suffix ${suffix[$dataset]}"
-    python "$job_script" "${residues[$index]}" "$splits_path" "${prot_info[$dataset]}" "$type" "${suffix[$dataset]}" ${extra_args[@]+"${extra_args[@]}"}
+    python "$job_script" --residues="${residues[$index]}" --dataset_path="$splits_path" --prot_info_path="${prot_info[$dataset]}" --type="$type" -o $out_dirname --pos_weight=$pos_weight ${extra_args[@]+"${extra_args[@]}"}
 fi
