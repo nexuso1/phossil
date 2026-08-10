@@ -152,8 +152,8 @@ fi
 
 if [[ -n "$checkpoint_path" ]]; then
     echo "Log already exists, resuming from checkpoint $checkpoint_path"
-    "$job_script" --checkpoint_path="$checkpoint_path"
+    python "$job_script" --checkpoint_path="$checkpoint_path"
 else
     echo "launching $job_script with index $index, residues ${residues[$index]}, splits path: $splits_path prot info: ${prot_info[$dataset]} suffix ${suffix[$dataset]}"
-    "$job_script" "${residues[$index]}" "$splits_path" "${prot_info[$dataset]}" "$type" "${suffix[$dataset]}" ${extra_args[@]+"${extra_args[@]}"}
+    python "$job_script" "${residues[$index]}" "$splits_path" "${prot_info[$dataset]}" "$type" "${suffix[$dataset]}" ${extra_args[@]+"${extra_args[@]}"}
 fi
