@@ -6,9 +6,9 @@ lora_checkpoint: ./model_ckp/lora/lora_splits_S_chunked_max_fold2.pt
 alpha: 0.5
 
 #data
-train_path: /home/samo/repos/phossil/data/phosf3c/phos/splits_S_chunked_max_fold2/train.fasta
-test_path: /home/samo/repos/phossil/data/phosf3c/phos/splits_S_chunked_max_fold2/test.fasta
-predict_path: /home/samo/repos/phossil/data/phosf3c/phos/splits_S_chunked_max_fold2/test.fasta
+train_path: ../data/phosf3c/phos/splits_S_chunked_max_fold2/train.fasta
+test_path: ../data/phosf3c/phos/splits_S_chunked_max_fold2/test.fasta
+predict_path: ../data/phosf3c/phos/splits_S_chunked_max_fold2/test.fasta
 type: ['S']
 
 #train
