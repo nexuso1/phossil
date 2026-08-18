@@ -102,7 +102,7 @@ def main(args):
 
 def add_arguments(parser):
     parser.add_argument('--lora_rank', type=int, default=8, help='LoRA rank')
-    parser.add_argument('--lora_alpha', type=int, default=16, help='LoRA alpha (scaling factor)')
+    parser.add_argument('--lora_alpha', type=float, default=16, help='LoRA alpha (scaling factor)')
     parser.add_argument('--lora_dropout', type=float, default=0.05, help='Dropout probability of the LoRA layers')
     parser.add_argument('--lora_targets', type=str, default=None,
                         help='Base model modules to apply LoRA to. Defaults to the attention projections of the given model type.')
