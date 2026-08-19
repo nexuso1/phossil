@@ -1,5 +1,7 @@
 # Computes last hidden layer embeddings of a protein dataset, one compressed file per protein.
 # Meant for comparing the representations of a trained model against the pretrained ones.
+# --residues restricts what is written to the candidate residues of the task (S/T/Y), which is most
+# of the size of the output for a fraction of the information.
 
 import argparse
 import numpy as np
@@ -8,6 +10,7 @@ import pandas as pd
 import torch
 
 from collections import defaultdict
+from data_loading import parse_residues
 from token_classifier_base import TokenClassifier
 from utils import get_esm
 
@@ -97,25 +100,50 @@ def stitch_chunk_embeddings(chunks : list, parent_length : int):
 
     return embeddings, ''.join(sequence)
 
-def save_protein(protein_id, chunks, parent_length, out_folder, dtype, save_chunks=False):
+def select_positions(sequence : str, residues : set|None, offset=0):
+    """
+    Positions of the residues that are kept, in whole protein coordinates. Without a residue set
+    every position is kept, so the rest of the code has one case to handle.
+    """
+    if residues is None:
+        return np.arange(len(sequence)) + offset
+
+    return np.array([i + offset for i, res in enumerate(sequence) if res in residues], dtype=int)
+
+def save_protein(protein_id, chunks, parent_length, out_folder, dtype, residues=None, save_chunks=False):
+    """
+    Writes the embeddings of one protein. Returns the number of positions saved, zero meaning the
+    protein has no residue of the selected types and no file is written.
+    """
     chunks = sorted(chunks, key=lambda chunk: chunk[0])
     embeddings, sequence = stitch_chunk_embeddings(chunks, parent_length)
+    # Whole protein positions of the saved rows, "embeddings"[j] is the embedding of residue
+    # "sequence"[positions[j]]. The full sequence is kept either way, it costs nothing.
+    positions = select_positions(sequence, residues)
+    if len(positions) == 0:
+        return 0
+
     arrays = {
-        'embeddings' : embeddings.astype(dtype),
+        'embeddings' : embeddings[positions].astype(dtype),
+        'positions' : positions,
         'sequence' : sequence,
         'id' : protein_id,
     }
 
     if save_chunks:
         # Chunks as they were embedded, keeping the copies stitching drops. Overlapping chunks see
-        # a residue with different context around it, "chunk_<i>"[p - chunk_offsets[i]] is how that
-        # residue was embedded by chunk i.
+        # a residue with different context around it, so "chunk_<i>" is how chunk i embedded the
+        # positions listed in "chunk_positions_<i>", again in whole protein coordinates.
         arrays['chunk_offsets'] = np.array([offset for offset, _, _, _ in chunks])
         arrays['chunk_ids'] = np.array([chunk_id for _, _, _, chunk_id in chunks])
-        for i, (_, chunk_embeddings, _, _) in enumerate(chunks):
-            arrays[f'chunk_{i}'] = chunk_embeddings.astype(dtype)
+        for i, (offset, chunk_embeddings, chunk_sequence, _) in enumerate(chunks):
+            chunk_positions = select_positions(chunk_sequence, residues, offset=offset)
+            arrays[f'chunk_{i}'] = chunk_embeddings[chunk_positions - offset].astype(dtype)
+            arrays[f'chunk_positions_{i}'] = chunk_positions
 
     np.savez_compressed(os.path.join(out_folder, f'{protein_id}.npz'), **arrays)
+
+    return len(positions)
 
 def compute_embeddings(args):
     device = torch.device(args.device)
@@ -125,11 +153,15 @@ def compute_embeddings(args):
     data = add_chunk_columns(pd.read_json(args.prot_info).dropna())
     os.makedirs(args.out_folder, exist_ok=True)
 
+    residues = set(parse_residues(args.residues)) if args.residues else None
+    if residues is not None:
+        print(f'Saving the embeddings of {"".join(sorted(residues))} residues only')
+
     # A protein is saved once all of its chunks have been embedded
     n_chunks = data.groupby('parent_id').size().to_dict()
     parent_lengths = data.groupby('parent_id')['parent_length'].first().to_dict()
     pending = defaultdict(list)
-    done = 0
+    done, empty = 0, 0
 
     for start in range(0, len(data), args.batch_size):
         rows = data.iloc[start:start + args.batch_size]
@@ -139,13 +171,17 @@ def compute_embeddings(args):
             pending[row.parent_id].append((int(row.offset), chunk_embeddings, row.sequence, row.id))
 
         for protein_id in [p for p in pending if len(pending[p]) == n_chunks[p]]:
-            save_protein(protein_id, pending.pop(protein_id), int(parent_lengths[protein_id]),
-                         args.out_folder, args.dtype, save_chunks=args.save_chunks)
-            done += 1
+            saved = save_protein(protein_id, pending.pop(protein_id), int(parent_lengths[protein_id]),
+                                 args.out_folder, args.dtype, residues=residues,
+                                 save_chunks=args.save_chunks)
+            done += saved > 0
+            empty += saved == 0
 
         print(f'{min(start + args.batch_size, len(data))}/{len(data)} chunks, {done} proteins saved', end='\r')
 
     print(f'\nSaved embeddings of {done} proteins to {args.out_folder}')
+    if empty:
+        print(f'Skipped {empty} proteins without a single selected residue')
 
 def main(args):
     compute_embeddings(args)
@@ -160,6 +196,8 @@ if __name__ == '__main__':
                         help='Saved TokenClassifier to take the base model from. Without it the pretrained model of --type is used.')
     parser.add_argument('--type', type=str, default='650M',
                         help='ESM model type, used when no --model_path is given.')
+    parser.add_argument('--residues', type=str, default=None,
+                        help='Residues to save the embeddings of, e.g. "STY" or "[\'S\', \'T\', \'Y\']". Every position is saved by default.')
     parser.add_argument('--batch_size', type=int, default=8, help='Number of chunks embedded at once')
     parser.add_argument('--dtype', type=str, default='float16', choices=['float16', 'float32'],
                         help='Data type the embeddings are stored in. Half precision halves the size of the output.')
