@@ -4,6 +4,8 @@
 
 import torch
 import lightning as L
+import numpy as np
+import random
 import os.path
 import datetime
 import matplotlib.pyplot as plt
@@ -109,6 +111,43 @@ class LightningWrapper(L.LightningModule):
             self.print_counter = 0
             
         self.save_hyperparameters(args)
+
+    def on_save_checkpoint(self, checkpoint):
+        """
+        Lightning does not checkpoint the state of the random number generators. Without it a
+        resumed run shuffles the data and perturbs the residues differently than an uninterrupted
+        one would have from the same point on.
+        """
+        # The numpy state holds an array that torch.load refuses to unpickle in its default
+        # weights_only mode, so it is stored decomposed into a tensor and plain numbers
+        bit_generator, keys, pos, has_gauss, cached_gaussian = np.random.get_state()
+        checkpoint['rng_state'] = {
+            'python' : random.getstate(),
+            'numpy' : {
+                'bit_generator' : bit_generator,
+                'keys' : torch.as_tensor(keys.astype(np.int64)),
+                'pos' : int(pos),
+                'has_gauss' : int(has_gauss),
+                'cached_gaussian' : float(cached_gaussian),
+            },
+            'torch' : torch.get_rng_state(),
+            'torch_cuda' : torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
+        }
+
+    def on_load_checkpoint(self, checkpoint):
+        rng_state = checkpoint.get('rng_state')
+        # Checkpoints written before the state was saved can still be resumed from
+        if rng_state is None:
+            print('Checkpoint has no RNG state, resuming with a freshly seeded one')
+            return
+
+        numpy_state = rng_state['numpy']
+        random.setstate(rng_state['python'])
+        np.random.set_state((numpy_state['bit_generator'], numpy_state['keys'].numpy().astype(np.uint32),
+                             numpy_state['pos'], numpy_state['has_gauss'], numpy_state['cached_gaussian']))
+        torch.set_rng_state(rng_state['torch'].cpu().to(torch.uint8))
+        if torch.cuda.is_available() and len(rng_state['torch_cuda']) == torch.cuda.device_count():
+            torch.cuda.set_rng_state_all(rng_state['torch_cuda'])
 
     def _compute_metrics_step(self, logits, labels, step_metrics, epoch_metrics, batch_size=None, **kwargs):
         step_vals = step_metrics(logits, labels)
@@ -650,7 +689,7 @@ def run_training(args : Namespace, create_model_fn):
 
 
 def run_release_training(args, create_model_fn):
-    L.seed_everything(args.seed)
+    L.seed_everything(args.seed, workers=True)
 
     log_dirname = args.o if args.o else "{}_{}".format(
             os.path.basename(globals().get("__file__", "notebook")),
