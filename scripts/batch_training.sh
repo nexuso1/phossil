@@ -37,10 +37,11 @@ job_script=""
 dataset=""
 splits_suffix=""
 type=""
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-data_dir="$script_dir/../data"
+repo_dir=/work/fancis/phossil
+script_dir="$repo_dir"/scripts
+data_dir="$repo_dir"/data
 name=""
-log_dir="$script_dir/../model/new_logs"
+log_dir="$repo_dir"/scripts/new_logs
 
 # Arguments that are not recognized below, forwarded to the job script as-is
 extra_args=()
