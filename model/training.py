@@ -47,6 +47,8 @@ parser.add_argument('--frozen_lr', type=float, help='Frozen phase starting learn
 parser.add_argument('-o', type=str, help='Output folder', default=None)
 parser.add_argument('-n', type=str, help='Model name', default='esm')
 parser.add_argument('--compile', action='store_true', default=False, help='Compile the model')
+parser.add_argument('--grad_checkpointing', action='store_true', default=False,
+                    help='Recompute base model activations in the backward pass instead of keeping them. Large memory saving for roughly a third more compute per step.')
 parser.add_argument('--lora', action='store_true', help='Use LoRA', default=False)
 parser.add_argument('--dropout', type=float, help='Dropout probability', default=0)
 parser.add_argument('--type', help='ESM Model type', type=str, default='650M')
@@ -475,6 +477,23 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
 
     return model, val_metrics, test_metrics
 
+def enable_grad_checkpointing(model : TokenClassifier):
+    """
+    Makes the base model layers drop their intermediate activations in the forward pass and
+    recompute them in the backward pass. Activation memory stops growing with the depth of the
+    model, at the cost of running the forward pass of every layer twice.
+
+    use_reentrant=False is required. The reentrant implementation decides whether to recompute
+    from whether the checkpointed input requires grad, which it does not when the base model is
+    frozen, and the LoRA adapters would silently never receive a gradient.
+    """
+    if not hasattr(model.base, 'gradient_checkpointing_enable'):
+        raise ValueError(f'The base model of {type(model).__name__} does not support gradient checkpointing')
+
+    model.base.gradient_checkpointing_enable(gradient_checkpointing_kwargs={'use_reentrant' : False})
+
+    return model
+
 def compile_model(model : TokenClassifier):
     """
     Compiles the base model, which holds nearly all of the compute.
@@ -490,6 +509,9 @@ def compile_model(model : TokenClassifier):
 
 def prepare_model(args, create_model_fn):
     model, tokenizer = create_model_fn(args)
+
+    if args.grad_checkpointing:
+        model = enable_grad_checkpointing(model)
 
     if args.compile:
         model = compile_model(model)
