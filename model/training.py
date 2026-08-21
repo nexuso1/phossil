@@ -99,12 +99,6 @@ class LightningWrapper(L.LightningModule):
         self.test_preds = []
         self.val_preds = []
         self.save_val_preds = False
-        # self.optimal_threshold = 0
-        # self.optimal_dev_metric_values = {
-        #     'f1' : 0,
-        #     'precision' : 0,
-        #     'recall' : 0
-        # }
         self.debug = False
         if hasattr(args, "debug") and args.debug:
             self.debug = True
@@ -266,7 +260,6 @@ class LightningWrapper(L.LightningModule):
             )
             plt.close(fig=fig)
 
-
     def find_optimal_threhsold(self):
         precision, recall, thresholds = self.val_epoch_metrics['val_prcurve'].compute()
         # Slice precision and recall to match the exact size of the thresholds tensor
@@ -350,7 +343,11 @@ class LightningWrapper(L.LightningModule):
                 "eps": 1e-8,
                 'lr' : self.lr,
             }
-        if self.hparams.fix_decay:
+        # Models can build their own parameter groups, e.g. for layer-wise learning rate decay
+        if hasattr(self.classifier, 'get_param_groups'):
+            optimizer_parameters = self.classifier.get_param_groups(self.lr, self.hparams.weight_decay,
+                                                                    fix_decay=self.hparams.fix_decay)
+        elif self.hparams.fix_decay:
             decay_parameters = self.get_parameter_names(self.classifier, [torch.nn.LayerNorm])
             decay_parameters = [name for name in decay_parameters if "bias" not in name]
             optimizer_parameters = [
