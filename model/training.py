@@ -670,7 +670,7 @@ def run_training(args : Namespace, create_model_fn):
 
     for fold in range(start, end):
 
-        print(f'Current fold: {fold}')
+        print(f'Training on fold: {fold}')
         train_ds, dev_ds, test_ds = full_dataset.get_fold(fold)
         model, tokenizer = prepare_model(args, create_model_fn)
         train = DataLoader(train_ds, args.batch_size, shuffle=True,
