@@ -556,8 +556,10 @@ def handle_metadata(args, n_folds=5):
             for k, v in meta.data['args'].items():
                 args.__setattr__(k, v)
         if not meta.data['fold_finished'][int(meta.data['current_fold'])]:
+            print("Current fold is not finished and the checkpoint is from current fold, resuming training")
             args.checkpoint_path = chkpt_path
-
+        else:
+            print("Current fold is finished, ignoring checkpoint (if provided) and continuing with the next fold.")
     return meta
 
 def create_metrics(ignore_index):
