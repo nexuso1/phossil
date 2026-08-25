@@ -652,25 +652,26 @@ def run_training(args : Namespace, create_model_fn):
 
 
     master_logdir = args.logdir
-
+    to_train = [False for _ in range(full_dataset.n_splits)]
     if check_fold:
         # Single fold training
         if meta.data['fold_finished'][fold_to_check]:
             print(f'Training for fold {fold_to_check} already finished.')
             return
 
-        start, end = fold_to_check, fold_to_check + 1
+        to_train[fold_to_check] = True
 
     else:
         for i in range(len(meta.data['fold_finished'])):
             if not meta.data['fold_finished'][i]:
-                start = i
-                print(f'Fold {i} is the first fold that is not finished, starting training there.')
-                break 
-        end = full_dataset.n_splits
+                to_train[i] = True
 
-    for fold in range(start, end):
+    print(f'Folds to train: {to_train}')
 
+    for fold in range(to_train):
+        if not to_train[i]:
+            continue
+        
         print(f'Training on fold: {fold}')
         train_ds, dev_ds, test_ds = full_dataset.get_fold(fold)
         model, tokenizer = prepare_model(args, create_model_fn)
