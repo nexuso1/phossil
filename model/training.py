@@ -668,10 +668,10 @@ def run_training(args : Namespace, create_model_fn):
 
     print(f'Folds to train: {to_train}')
 
-    for fold in range(to_train):
+    for fold in range(len(to_train)):
         if not to_train[i]:
             continue
-        
+
         print(f'Training on fold: {fold}')
         train_ds, dev_ds, test_ds = full_dataset.get_fold(fold)
         model, tokenizer = prepare_model(args, create_model_fn)
