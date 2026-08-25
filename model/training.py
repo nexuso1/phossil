@@ -639,6 +639,7 @@ def run_training(args : Namespace, create_model_fn):
         )
 
     args.logdir = os.path.join("new_logs", log_dirname)
+    check_fold=False
     if args.fold is not None:
         check_fold = True
         fold_to_check = args.fold
