@@ -639,6 +639,9 @@ def run_training(args : Namespace, create_model_fn):
         )
 
     args.logdir = os.path.join("new_logs", log_dirname)
+    if args.fold is not None:
+        check_fold = True
+        fold_to_check = args.fold
 
     meta = handle_metadata(args)
     full_dataset = prepare_datasets(args, ignore_label=args.ignore_label)
@@ -646,13 +649,13 @@ def run_training(args : Namespace, create_model_fn):
 
     master_logdir = args.logdir
 
-    if args.fold is not None:
+    if check_fold:
         # Single fold training
-        if meta.data['fold_finished'][args.fold]:
-            print(f'Training for fold {args.fold} already finished.')
+        if meta.data['fold_finished'][fold_to_check]:
+            print(f'Training for fold {fold_to_check} already finished.')
             return
 
-        start, end = args.fold, args.fold + 1
+        start, end = fold_to_check, fold_to_check + 1
 
     else:
         start, end = meta.data['current_fold'], full_dataset.n_splits
