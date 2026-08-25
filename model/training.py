@@ -665,6 +665,7 @@ def run_training(args : Namespace, create_model_fn):
         for i in range(len(meta.data['fold_finished'])):
             if not meta.data['fold_finished'][i]:
                 start = i
+                print(f'Fold {i} is the first fold that is not finished, starting training there.')
                 break 
         end = full_dataset.n_splits
 
