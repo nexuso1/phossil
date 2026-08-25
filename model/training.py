@@ -652,8 +652,11 @@ def run_training(args : Namespace, create_model_fn):
 
 
     master_logdir = args.logdir
+    print(args.fold)
     to_train = [False for _ in range(full_dataset.n_splits)]
-    if check_fold:
+    if check_fold or args.fold is not None:
+        # Args fold could have been present in the checkpoint
+        fold_to_check = args.fold if args.fold is not None else fold_to_check
         # Single fold training
         if meta.data['fold_finished'][fold_to_check]:
             print(f'Training for fold {fold_to_check} already finished.')
