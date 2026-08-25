@@ -659,7 +659,11 @@ def run_training(args : Namespace, create_model_fn):
         start, end = fold_to_check, fold_to_check + 1
 
     else:
-        start, end = meta.data['current_fold'], full_dataset.n_splits
+        for i in range(len(meta.data['fold_finished'])):
+            if not meta.data['fold_finished'][i]:
+                start = i
+                break 
+        end = full_dataset.n_splits
 
     for fold in range(start, end):
 
