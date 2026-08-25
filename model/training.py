@@ -542,7 +542,7 @@ def handle_metadata(args, n_folds=5):
             if 'current_fold' not in meta.data:
                 meta.data['current_fold'] = int(par_dir.name[-1])
 
-            if 'fold_finised' not in meta.data:
+            if 'fold_finished' not in meta.data:
                 meta.data['fold_finished'] = [False for _ in range(n_folds)]
                 for i in range(0, meta.data['current_fold']):
                     meta.data['fold_finished'][i] = True
@@ -555,7 +555,8 @@ def handle_metadata(args, n_folds=5):
             # Retrieve training args from the existing metadata
             for k, v in meta.data['args'].items():
                 args.__setattr__(k, v)
-        args.checkpoint_path = chkpt_path
+        if not meta.data['fold_finished'][int(meta.data['current_fold'])]:
+            args.checkpoint_path = chkpt_path
 
     return meta
 
