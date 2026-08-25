@@ -669,7 +669,7 @@ def run_training(args : Namespace, create_model_fn):
     print(f'Folds to train: {to_train}')
 
     for fold in range(len(to_train)):
-        if not to_train[i]:
+        if not to_train[fold]:
             continue
 
         print(f'Training on fold: {fold}')
