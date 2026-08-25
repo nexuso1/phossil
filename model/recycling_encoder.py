@@ -16,6 +16,8 @@ class RecyclingClassifierConfig(TokenClassifierConfig):
     n_enc_layers : int = 3
     kernel_size = 31
     use_cnn : bool = False
+    # Use a gated SwiGLU feedforward block in the encoder layers instead of the dense one
+    swiglu : bool = False
 
     
 class RecyclingClassifier(TokenClassifier):
@@ -27,7 +29,8 @@ class RecyclingClassifier(TokenClassifier):
         model_dim = base_model.config.hidden_size if not config.dim_model else config.dim_model
         self.create_projection_layer(config)
         self.encoder = RecyclingEncoder(model_dim, config.n_heads, config.n_enc_layers, config.n_recycle_steps,
-                                        dropout=config.dropout_rate, d_feedforward=config.dim_ffw)
+                                        dropout=config.dropout_rate, d_feedforward=config.dim_ffw,
+                                        swiglu=config.swiglu)
         self.output = torch.nn.Linear(model_dim, config.n_labels)
 
     def create_projection_layer(self, config):
@@ -67,7 +70,8 @@ def create_model(args):
 
     config = RecyclingClassifierConfig(n_labels=1,loss=create_loss(args), base_type=args.type, n_recycle_steps=args.n_recycle_steps,
                                        n_heads = args.n_heads, n_enc_layers = args.n_enc_layers, dropout_rate=args.dropout,
-                                       dim_ffw=args.dim_ffw, use_cnn=args.use_cnn, dim_model=args.dim_model)
+                                       dim_ffw=args.dim_ffw, use_cnn=args.use_cnn, dim_model=args.dim_model,
+                                       swiglu=args.swiglu)
     model = RecyclingClassifier(base_model=esm, config=config)
     model.set_base_requires_grad(False)
     return model, tokenizer
@@ -79,6 +83,8 @@ def add_arguments(parser):
     parser.add_argument('--dim_ffw', type=int, default=512)
     parser.add_argument('--dim_model', type=int, default= None)
     parser.add_argument('--use_cnn', type=bool, default=False)
+    parser.add_argument('--swiglu', action='store_true', default=False,
+                        help='Use a gated SwiGLU feedforward block in the encoder layers instead of the dense one.')
 
 def main(args):
     run_training(args, create_model)

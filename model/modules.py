@@ -323,21 +323,31 @@ class FusedMBConv1D(torch.nn.Module):
         return x.moveaxis(1, -1)
 
 class ResidualTransformerLayer(torch.nn.Module):
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activ=torch.nn.SiLU):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activ=torch.nn.SiLU,
+                 swiglu=False, multiple_of=32, ffn_dim_multiplier=None):
         super().__init__()
         self.self_attn = torch.nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
-        
+        self.swiglu = swiglu
+
         # Implementation of Feedforward block
-        self.linear1 = torch.nn.Linear(d_model, dim_feedforward)
-        self.dropout = torch.nn.Dropout(dropout)
-        self.linear2 = torch.nn.Linear(dim_feedforward, d_model)
+        if swiglu:
+            # PackedSwiGLUFFN scales the hidden dimension by 2/3, so that the three matrices of the
+            # gated block hold about as many parameters as the two of the dense one. It then rounds
+            # up to a multiple of "multiple_of", which at the feedforward sizes used here has to stay
+            # small, or the rounding cancels the 2/3 out again.
+            self.ffn = PackedSwiGLUFFN(d_model, dim_feedforward, multiple_of=multiple_of,
+                                       ffn_dim_multiplier=ffn_dim_multiplier)
+        else:
+            self.linear1 = torch.nn.Linear(d_model, dim_feedforward)
+            self.dropout = torch.nn.Dropout(dropout)
+            self.linear2 = torch.nn.Linear(dim_feedforward, d_model)
+            self.activ = activ()
 
         # Normalization layers
         self.norm1 = torch.nn.LayerNorm(d_model)
         self.norm2 = torch.nn.LayerNorm(d_model)
         self.dropout1 = torch.nn.Dropout(dropout)
         self.dropout2 = torch.nn.Dropout(dropout)
-        self.activ = activ()
         
     def forward(self, x, mask=None):
         # 1. Multi-head Attention + Residual (Pre-LN style)
@@ -357,17 +367,18 @@ class ResidualTransformerLayer(torch.nn.Module):
         # 2. Feedforward + Residual (Pre-LN style)
         residual = x
         x = self.norm2(x)
-        ff_output = self.linear2(self.dropout(self.activ(self.linear1(x))))
+        ff_output = self.ffn(x) if self.swiglu else self.linear2(self.dropout(self.activ(self.linear1(x))))
         x = residual + self.dropout2(ff_output)
         
         return x
     
 class RecyclingEncoder(torch.nn.Module):
-    def __init__(self, d_model, nhead, num_layers, num_recycles, dropout, d_feedforward):
+    def __init__(self, d_model, nhead, num_layers, num_recycles, dropout, d_feedforward, swiglu=False):
         super().__init__()
         self.num_recycles = num_recycles
         self.layers = torch.nn.ModuleList([
-            ResidualTransformerLayer(d_model, nhead, dropout=dropout, dim_feedforward=d_feedforward) for _ in range(num_layers)
+            ResidualTransformerLayer(d_model, nhead, dropout=dropout, dim_feedforward=d_feedforward,
+                                     swiglu=swiglu) for _ in range(num_layers)
         ])
         self.norm_final = torch.nn.LayerNorm(d_model)
         #self.initial_state = torch.nn.Parameter(torch.zeros(d_model))
@@ -389,3 +400,28 @@ class RecyclingEncoder(torch.nn.Module):
             prev_f = out # Update state for next recycle
             
         return self.norm_final(prev_f)
+
+class PackedSwiGLUFFN(torch.nn.Module):
+    def __init__(
+        self,
+        dim,
+        hidden_dim,
+        multiple_of,
+        ffn_dim_multiplier=None,
+        device=None,
+        dtype=None,
+    ):
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
+        hidden_dim = int(2 * hidden_dim / 3)
+        # custom dim factor multiplier
+        if ffn_dim_multiplier is not None:
+            hidden_dim = int(ffn_dim_multiplier * hidden_dim)
+        hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
+
+        self.w13 = torch.nn.Linear(dim, 2 * hidden_dim, bias=False, **factory_kwargs)
+        self.w2 = torch.nn.Linear(hidden_dim, dim, bias=False, **factory_kwargs)
+
+    def forward(self, x):
+        x1, x3 = torch.chunk(self.w13(x), 2, dim=-1)
+        return self.w2(torch.nn.functional.silu(x1) * x3)
