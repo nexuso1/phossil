@@ -1,0 +1,11 @@
+splits,fold,partition,file,proteins,positives,negatives,off_target,invalid
+splits_Y_chunked,0,train,../data/phosf3c/deeppsp/splits_Y_chunked_fold0/train.fasta,8742,28965,134997,0,0
+splits_Y_chunked,0,test,../data/phosf3c/deeppsp/splits_Y_chunked_fold0/test.fasta,968,3248,14503,0,0
+splits_Y_chunked,1,train,../data/phosf3c/deeppsp/splits_Y_chunked_fold1/train.fasta,8742,28965,134997,0,0
+splits_Y_chunked,1,test,../data/phosf3c/deeppsp/splits_Y_chunked_fold1/test.fasta,968,3248,14503,0,0
+splits_Y_chunked,2,train,../data/phosf3c/deeppsp/splits_Y_chunked_fold2/train.fasta,8742,28965,134997,0,0
+splits_Y_chunked,2,test,../data/phosf3c/deeppsp/splits_Y_chunked_fold2/test.fasta,968,3248,14503,0,0
+splits_Y_chunked,3,train,../data/phosf3c/deeppsp/splits_Y_chunked_fold3/train.fasta,8742,28965,134997,0,0
+splits_Y_chunked,3,test,../data/phosf3c/deeppsp/splits_Y_chunked_fold3/test.fasta,968,3248,14503,0,0
+splits_Y_chunked,4,train,../data/phosf3c/deeppsp/splits_Y_chunked_fold4/train.fasta,8742,28965,134997,0,0
+splits_Y_chunked,4,test,../data/phosf3c/deeppsp/splits_Y_chunked_fold4/test.fasta,968,3248,14503,0,0
