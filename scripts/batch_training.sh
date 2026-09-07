@@ -10,25 +10,19 @@
 #   --dataset        dbptm | phos | deeppsp (required)
 #   --splits_suffix  suffix of the splits file, e.g. "_max" (default: empty)
 #   --type           model type passed to the job script
-#   --data_dir       root of the data directory (default: <script dir>/../data)
-#   --name           run name prefix, enables resuming (see below)
-#   --log_dir        directory holding the run directories
-#                    (default: <script dir>/../model/new_logs)
+#   --pos_weight     positive class weight (default: empty, the training default)
+#   --data_dir       root of the data directory (default: <repo dir>/data)
+#   --name           run name prefix
 #
-# If --name is given, the run directory is <name>_<residues>_<type>_<suffix>,
-# the same name the job scripts build. When that directory already holds a
-# checkpoint, the job script is launched as
-#
-#   <job_script> --checkpoint_path=<latest fold checkpoint>
-#
-# and all other arguments are dropped -- the training args are restored from the
-# run's metadata.json. Without --name no checkpoint lookup happens and the job
-# script is always launched with the full argument list.
+# The run directory is <name>_<residues>_<pos_weight>_<type>_<suffix>, passed to
+# the job script as -o. Relaunching with the same arguments resumes the run:
+# training reads new_logs/<run dir>/metadata.json, continues at the first
+# unfinished fold and picks up that fold's checkpoint if it has one.
 
 set -u
 
 usage() {
-    sed -n '2,27p' "$0"
+    sed -n '2,22p' "$0"
     exit "${1:-1}"
 }
 
@@ -37,11 +31,11 @@ job_script=""
 dataset=""
 splits_suffix=""
 type=""
+pos_weight=""
 repo_dir=/work/fancis/phossil
 script_dir="$repo_dir"/scripts
 data_dir="$repo_dir"/data
 name=""
-log_dir="$repo_dir"/scripts/new_logs
 
 # Arguments that are not recognized below, forwarded to the job script as-is
 extra_args=()
@@ -71,7 +65,6 @@ while [[ $# -gt 0 ]]; do
         --type) type="$value" ;;
         --data_dir) data_dir="$value" ;;
         --name) name="$value" ;;
-        --log_dir) log_dir="$value" ;;
         -h|--help) usage 0 ;;
         *) known=0 ;;
     esac
@@ -107,7 +100,6 @@ fi
 
 declare -A prot_info
 prot_info=( ["dbptm"]="$data_dir"/dbptm/dbptm_info_chunked.json ["phos"]="$data_dir"/phosphosite_sequences/phosphosite_df_chunked.json ["deeppsp"]="$data_dir"/deeppsp/dpsp_info_"${residues[$index]}"_chunked.json )
-declare -A suffix
 suffix="$dataset""$splits_suffix"
 
 if [[ -z "${prot_info[$dataset]+set}" ]]; then
@@ -117,46 +109,9 @@ fi
 
 splits_path="$data_dir"/"$dataset"/splits_"${residues[$index]}""$splits_suffix".json
 
-# Latest checkpoint of the run, empty if the run has not been started yet
-find_checkpoint() {
-    local out_dirname="$1"
-    local regex="fold_([0-9]+)"
-    local max=-1
-    local final_path=""
-    local path dir num
-
-    if ! compgen -G "$log_dir/$out_dirname/fold_0/*.ckpt" > /dev/null; then
-        return
-    fi
-
-    for path in "$log_dir/$out_dirname"/*/chkpt.ckpt; do
-        [[ -f "$path" ]] || continue
-        dir="$(basename "$(dirname "$path")")"
-        if [[ "$dir" =~ $regex ]]; then
-            num="${BASH_REMATCH[1]}"
-            # Glob order is lexicographic, so fold_10 sorts before fold_2
-            if (( num > max )); then
-                max="$num"
-                final_path="$path"
-            fi
-        fi
-    done
-
-    echo "$final_path"
-}
-
-checkpoint_path=""
 out_dirname="$name"_"${residues[$index]}"_"$pos_weight"_"$type"_"$suffix"
-if [[ -n "$name" ]]; then
-    
-    checkpoint_path="$(find_checkpoint "$out_dirname")"
-    echo "Run directory: $log_dir/$out_dirname"
-fi
 
-if [[ -n "$checkpoint_path" ]]; then
-    echo "Log already exists, resuming from checkpoint $checkpoint_path"
-    python "$job_script" --checkpoint_path="$checkpoint_path"
-else
-    echo "launching $job_script with index $index, residues ${residues[$index]}, splits path: $splits_path prot info: ${prot_info[$dataset]} suffix $suffix"
-    python "$job_script" --residues="${residues[$index]}" --dataset_path="$splits_path" --prot_info_path="${prot_info[$dataset]}" --type="$type" -o $out_dirname --pos_weight=$pos_weight ${extra_args[@]+"${extra_args[@]}"}
-fi
+# The training script resumes an existing run on its own, from the metadata and the checkpoints in
+# new_logs/"$out_dirname", so the same command line launches a run and continues it
+echo "launching $job_script with index $index, residues ${residues[$index]}, splits path: $splits_path prot info: ${prot_info[$dataset]} suffix $suffix out dir $out_dirname"
+python "$job_script" --residues="${residues[$index]}" --dataset_path="$splits_path" --prot_info_path="${prot_info[$dataset]}" --type="$type" -o "$out_dirname" ${pos_weight:+--pos_weight="$pos_weight"} ${extra_args[@]+"${extra_args[@]}"}

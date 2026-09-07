@@ -26,7 +26,6 @@ from utils import Metadata, sigmoid_focal_loss
 from lightning.pytorch.loggers import TensorBoardLogger
 from data_loading import prepare_datasets, prepare_full_dataset, stitch_chunk_predictions
 from transformers import AutoTokenizer
-from pathlib import Path
 from argparse import Namespace, ArgumentParser
 
 parser = ArgumentParser()
@@ -55,7 +54,6 @@ parser.add_argument('--type', help='ESM Model type', type=str, default='650M')
 parser.add_argument('--pos_weight', help='Positive class weight', type=float, default=3)
 parser.add_argument('--num_workers', help='Number of multiprocessing workers', type=int, default=0)
 parser.add_argument('--n_layers', help='Number of RNN/Transformer classifier layers', type=int, default=1)
-parser.add_argument('--checkpoint_path', help='Resume training from checkpoint', type=str, default=None)
 parser.add_argument('--model_path', help='Load model from this path (not a checkpoint)', type=str, default=None)
 parser.add_argument('--focal', help='Use focal loss. In this mode, pos_weight will be treated as the alpha parameter.', action='store_true', default=False)
 parser.add_argument('--residues', help='List of residues to train on', default="['S', 'T', 'Y']", type=str)
@@ -402,6 +400,22 @@ def create_loss(args):
     
     return torch.nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([args.pos_weight]))
     
+def find_checkpoint(logdir, suffix=''):
+    """
+    Training checkpoint of a phase, or None if the phase has not been started yet.
+
+    Resuming is automatic and only ever looks at this one expected location: a phase whose
+    checkpoint is already in its log directory continues from it, one without a checkpoint starts
+    from scratch.
+    """
+    path = os.path.join(logdir, f'chkpt{suffix}.ckpt')
+
+    if os.path.exists(path):
+        print(f'Resuming from checkpoint {path}')
+        return path
+
+    return None
+
 def create_callbacks(logdir, patience, suffix=''):
 
     # Best model checkpoint
@@ -412,8 +426,8 @@ def create_callbacks(logdir, patience, suffix=''):
     es_callback = EarlyStopping('val_mcc', patience=patience, mode="max")
     return [best_callback, chkpt_callback, es_callback]
 
-def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, metadata : Metadata,
-                master_logdir):
+def train_model(args, train : DataLoader, dev : DataLoader, test : DataLoader, model : TokenClassifier, logdir : str, fold : int, metadata : Metadata,
+                master_logdir : str):
     step_metrics, epoch_metrics = create_metrics(args.ignore_label)
 
     logger = TensorBoardLogger(logdir, name=f'tb_log')
@@ -437,7 +451,7 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
                             deterministic=True, log_every_n_steps=1,  accumulate_grad_batches=args.accum, strategy=strategy,
                             default_root_dir=logdir, num_sanity_val_steps=0)
 
-        trainer.fit(training_model, train, dev, ckpt_path=args.checkpoint_path)
+        trainer.fit(training_model, train, dev, ckpt_path=find_checkpoint(logdir, suffix='_frozen'))
         best = torch.load(f'{logdir}/best_frozen.ckpt')
         training_model.load_state_dict(best['state_dict'])
         model = training_model.classifier
@@ -454,7 +468,7 @@ def train_model(args, train, dev, test, model : TokenClassifier, logdir, fold, m
     if not isinstance(model, LightningWrapper):
         training_model = LightningWrapper(args, model, step_metrics=step_metrics, epoch_metrics=epoch_metrics, ds_size=len(train), logdir=logdir,
                                 train_epochs=args.epochs, lr=args.lr)
-    trainer.fit(training_model, train, dev, ckpt_path=args.checkpoint_path)
+    trainer.fit(training_model, train, dev, ckpt_path=find_checkpoint(logdir))
     best = torch.load(f'{logdir}/best.ckpt')
     training_model.load_state_dict(best['state_dict'])
     # Validation metrics of the best checkpoint, meant to be used for model selection
@@ -519,7 +533,18 @@ def prepare_model(args, create_model_fn):
     return model, tokenizer
 
 def handle_metadata(args, n_folds=5):
-    if not args.checkpoint_path:
+    """
+    Loads the metadata of the run in args.logdir, creating it if the run does not exist yet.
+
+    An existing run is resumed on its own: 'fold_finished' decides where to continue, and the
+    training args are restored from the metadata, so no arguments beyond the output folder have to
+    be repeated. The one argument that still wins over the metadata is --fold, which restricts the
+    run to a single fold. Whether the fold that is continued starts from scratch or from a
+    checkpoint is decided later, by find_checkpoint, per fold.
+    """
+    meta_path = os.path.join(args.logdir, 'metadata.json')
+
+    if not os.path.exists(meta_path):
         # Create metadata
 
         meta = Metadata()
@@ -530,36 +555,50 @@ def handle_metadata(args, n_folds=5):
         meta.data['frozen_finished'] = [False for _ in range(n_folds)]
         meta.data['fold_finished'] = [False for _ in range(n_folds)]
         meta.save(args.logdir)
+        return meta
+
+    # Parse info from the metadata file
+
+    with open(meta_path, 'r') as f:
+        meta = Metadata(**json.load(f))
+
+    # Fix old way of saving metadata if applicable
+    if 'fold_finished' not in meta.data:
+        meta.data['fold_finished'] = [False for _ in range(n_folds)]
+        for i in range(0, meta.data.get('current_fold', 0)):
+            meta.data['fold_finished'][i] = True
+
+    meta.data.setdefault('frozen_finished', [False for _ in range(n_folds)])
+    for metrics_key in ['test_metrics', 'val_metrics']:
+        metrics = meta.data.setdefault(metrics_key, [])
+        if len(metrics) < n_folds:
+            for _ in range(n_folds - len(metrics)):
+                metrics.append({})
+
+    # An explicitly given --fold overrides the one stored in the metadata, so it has to survive
+    # restoring the args of the run
+    fold_override = args.fold
+
+    # Retrieve training args from the existing metadata
+    for k, v in meta.data['args'].items():
+        args.__setattr__(k, v)
+
+    if fold_override is not None:
+        args.fold = fold_override
+
+    fold_finished = meta.data['fold_finished']
+    unfinished = [i for i, finished in enumerate(fold_finished) if not finished]
+    # Past the last fold once every fold is done, which stops the training loop
+    meta.data['current_fold'] = unfinished[0] if unfinished else len(fold_finished)
+
+    if args.fold is not None:
+        print(f'Resuming run {args.logdir}, restricted to fold {args.fold} by --fold')
+    elif unfinished:
+        print(f'Resuming run {args.logdir} at fold {meta.data["current_fold"]}, '
+              f'finished folds: {[i for i, finished in enumerate(fold_finished) if finished]}')
     else:
-        # Parse info from the metadata file
+        print(f'Run {args.logdir} has all {len(fold_finished)} folds finished')
 
-        par_dir = Path(args.checkpoint_path).parent
-        chkpt_path = args.checkpoint_path
-        with open(f'{par_dir.parent}/metadata.json', 'r') as f:
-            meta = Metadata(**json.load(f))
-            
-            # Fix old way of saving metada if applicable
-            if 'current_fold' not in meta.data:
-                meta.data['current_fold'] = int(par_dir.name[-1])
-
-            if 'fold_finished' not in meta.data:
-                meta.data['fold_finished'] = [False for _ in range(n_folds)]
-                for i in range(0, meta.data['current_fold']):
-                    meta.data['fold_finished'][i] = True
-            for metrics_key in ['test_metrics', 'val_metrics']:
-                metrics = meta.data.setdefault(metrics_key, [])
-                if len(metrics) < n_folds:
-                    for _ in range(n_folds - len(metrics)):
-                        metrics.append({})
-
-            # Retrieve training args from the existing metadata
-            for k, v in meta.data['args'].items():
-                args.__setattr__(k, v)
-        if not meta.data['fold_finished'][int(meta.data['current_fold'])]:
-            print("Current fold is not finished and the checkpoint is from current fold, resuming training")
-            args.checkpoint_path = chkpt_path
-        else:
-            print("Current fold is finished, ignoring checkpoint (if provided) and continuing with the next fold.")
     return meta
 
 def create_metrics(ignore_index):
@@ -642,27 +681,21 @@ def run_training(args : Namespace, create_model_fn):
         )
 
     args.logdir = os.path.join("new_logs", log_dirname)
-    check_fold=False
-    if args.fold is not None:
-        check_fold = True
-        fold_to_check = args.fold
 
     meta = handle_metadata(args)
     full_dataset = prepare_datasets(args, ignore_label=args.ignore_label)
 
 
     master_logdir = args.logdir
-    print(args.fold)
     to_train = [False for _ in range(full_dataset.n_splits)]
-    if check_fold or args.fold is not None:
-        # Args fold could have been present in the checkpoint
-        fold_to_check = args.fold if args.fold is not None else fold_to_check
-        # Single fold training
-        if meta.data['fold_finished'][fold_to_check]:
-            print(f'Training for fold {fold_to_check} already finished.')
+    if args.fold is not None:
+        # Single fold training. args.fold may come from the command line or, when resuming, from
+        # the metadata of the run
+        if meta.data['fold_finished'][args.fold]:
+            print(f'Training for fold {args.fold} already finished.')
             return
 
-        to_train[fold_to_check] = True
+        to_train[args.fold] = True
 
     else:
         for i in range(len(meta.data['fold_finished'])):
@@ -712,10 +745,6 @@ def run_training(args : Namespace, create_model_fn):
 
         meta.data['current_fold'] = fold + 1
         meta.data['fold_finished'][fold] = True
-
-        if args.checkpoint_path:
-            # Clear the checkpoint after resuming
-            args.checkpoint_path = None
         meta.save(master_logdir)
     if args.fold is None:
         compute_averages(meta)
@@ -759,8 +788,11 @@ def train_release_model(args, logdir, model, train, dev=None):
     best_callback = ModelCheckpoint(logdir, filename='best', monitor='val_f1', mode='max',
                                     save_on_train_epoch_end=True, auto_insert_metric_name=True)
 
+    # Training checkpoint (because having a defined ModelCheckpoint overrides the default
+    # checkpointing), the one find_checkpoint resumes from
+    chkpt_callback = ModelCheckpoint(logdir, filename='chkpt')
     es_callback = EarlyStopping('val_f1', patience=args.patience, mode="max")
-    callbacks : list[Callback] = [es_callback, best_callback]
+    callbacks : list[Callback] = [es_callback, best_callback, chkpt_callback]
 
     # Use deepspeed 
     if torch.cuda.device_count() > 1:
@@ -770,7 +802,7 @@ def train_release_model(args, logdir, model, train, dev=None):
     trainer = L.Trainer(logger=logger, callbacks=callbacks, max_epochs=args.epochs,
                         deterministic=True, log_every_n_steps=1,  accumulate_grad_batches=args.accum, strategy=strategy,
                         default_root_dir=logdir)
-    trainer.fit(model, train, dev, ckpt_path=args.checkpoint_path)
+    trainer.fit(model, train, dev, ckpt_path=find_checkpoint(logdir))
     best = torch.load(f'{logdir}/best.ckpt', weights_only=False)
     model.load_state_dict(best['state_dict'])
     final_metrics = trainer.test(model, dev)
