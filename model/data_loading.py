@@ -314,9 +314,9 @@ def parse_residues(residue_string):
         residues = residue_string
 
     if type(residues) is str:
-        print('Covnerting input residues to list')
+        print('Converting input residues to list')
         residues = list(residues)
-
+        print(f'Parsed residues: {residues}')
     return residues
 
 def prepare_datasets(args, ignore_label):
