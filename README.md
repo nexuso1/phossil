@@ -1,4 +1,4 @@
-# Prediction of Phosphorylation Sites using Protein Language Models
+# Fine-tuning methods for phosphorylation site prediction
 
 This is the main repository containing source code and data used in our project.
 
