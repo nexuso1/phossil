@@ -2,8 +2,15 @@ import streamlit as st
 import pandas as pd
 import json
 import os
+import sys
 import glob
 import plotly.express as px
+
+# The optimal-threshold computation lives next to the training code so it can reuse its metric
+# definitions. Importing this module is cheap (torch/training are pulled in lazily only when metrics
+# are actually computed), so it does not slow down dashboard startup.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "model"))
+import threshold_metrics
 
 # Set page configuration
 st.set_page_config(layout="wide", page_title="ML Experiment Comparator")
@@ -172,6 +179,29 @@ with st.sidebar:
 
     st.markdown("---")
     st.write("point this to the parent folder containing your experiment subfolders.")
+
+    st.markdown("---")
+    st.subheader("Optimal threshold")
+    st.caption(
+        "Tune each fold's decision threshold on validation MCC and write the resulting `*_opt` "
+        "metrics back into every run's metadata.json."
+    )
+    if st.button("Compute for all runs"):
+        exp_dirs = threshold_metrics.find_experiment_dirs(root_dir)
+        if not exp_dirs:
+            st.warning("No runs with saved predictions found under this directory.")
+        else:
+            updated = 0
+            progress = st.progress(0.0)
+            for i, exp_dir in enumerate(exp_dirs):
+                try:
+                    updated += threshold_metrics.update_experiment_metadata(exp_dir)
+                except Exception as e:
+                    st.warning(f"Skipped {os.path.basename(exp_dir)}: {e}")
+                progress.progress((i + 1) / len(exp_dirs))
+            st.success(f"Updated {updated} fold(s) across {len(exp_dirs)} run(s).")
+            st.cache_data.clear()
+            st.rerun()
 
 # 2. Data Loading
 if os.path.isdir(root_dir):
