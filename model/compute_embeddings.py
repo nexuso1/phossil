@@ -16,10 +16,9 @@ from ast import literal_eval
 from collections import defaultdict
 from data_loading import parse_residues
 from token_classifier_base import TokenClassifier
-from typing import NamedTuple
 from utils import get_esm
 
-class Chunk(NamedTuple):
+class Chunk:
     """
     One embedded chunk. "attention" is (layers, heads, chunk length, chunk length) and
     "attention_special" (layers, heads, chunk length, 2) when attention layers were asked for, both
