@@ -16,9 +16,10 @@ from ast import literal_eval
 from collections import defaultdict
 from data_loading import parse_residues
 from token_classifier_base import TokenClassifier
+from typing import NamedTuple
 from utils import get_esm
-
-class Chunk:
+    
+class Chunk(NamedTuple):
     """
     One embedded chunk. "attention" is (layers, heads, chunk length, chunk length) and
     "attention_special" (layers, heads, chunk length, 2) when attention layers were asked for, both
@@ -93,32 +94,100 @@ def enable_attention_output(base):
     else:
         base.config._attn_implementation = 'eager'
 
+# The training loop trains a LightningWrapper around the classifier, which holds it under
+# "classifier", as an attribute of the pickled module and as a state dict prefix alike
+WRAPPER_PREFIX = 'classifier.'
+
+def unwrap_training_module(saved):
+    """
+    Peels the LightningWrapper of the training loop off what was loaded, so that a training
+    checkpoint (fold_N/best.ckpt, fold_N/chkpt.ckpt) reaches the rest of load_base_model in the same
+    shape a file written by TokenClassifier.save() does: a TokenClassifier, or a dict with the state
+    dict of one. A wrapper checkpoint has no classifier config, it carries the training args under
+    "hyper_parameters" instead, and those name the backbone, which is all the base model needs.
+    """
+    if isinstance(saved, torch.nn.Module):
+        if isinstance(saved, TokenClassifier):
+            return saved
+
+        # Unpickling the wrapper has imported the training module already, this costs nothing
+        from training import LightningWrapper
+        if not isinstance(saved, LightningWrapper):
+            raise ValueError(f'{type(saved).__name__} is neither a TokenClassifier nor a LightningWrapper')
+
+        return saved.classifier
+
+    state_dict = saved['state_dict']
+    # The classification head of a TokenClassifier is called "classifier" too, so the prefix alone
+    # does not tell the two apart, the base model under it does
+    if not any(key.startswith(f'{WRAPPER_PREFIX}base.') for key in state_dict):
+        return saved
+
+    unwrapped = {key.removeprefix(WRAPPER_PREFIX) : value for key, value in state_dict.items()
+                 if key.startswith(WRAPPER_PREFIX)}
+    # Everything the prefix does not cover is state of the wrapper itself, the metrics and the loss
+    return {'state_dict' : unwrapped, 'hyper_parameters' : saved.get('hyper_parameters')}
+
+def saved_base_type(config, train_args, args):
+    """
+    Which backbone the saved weights belong to. A classifier config says so itself, a training
+    checkpoint has the training args instead, and a file with neither leaves nothing but --type.
+    """
+    if config is not None:
+        return config.base_type
+
+    if train_args and train_args.get('type'):
+        return train_args['type']
+
+    print(f'The saved model does not say what backbone it was trained on, assuming --type {args.type}')
+    return args.type
+
+def build_lora_classifier(config, train_args):
+    """
+    An empty LoRA classifier to load saved LoRA weights into, together with its tokenizer. peft
+    wraps the base model, so the adapters have to be in place before the weights are loaded.
+    """
+    if config is not None:
+        from lora_model import LoRAClassifier
+        base, tokenizer = get_esm(config.base_type)
+        return LoRAClassifier(config=config, base_model=base), tokenizer
+
+    if not train_args:
+        raise ValueError('The saved LoRA model has neither a config nor training arguments, '
+                         'there is nothing to rebuild the adapters from')
+
+    # A training checkpoint carries the training args rather than the config, and the LoRA entry
+    # point builds the same model out of them that the run was trained with
+    from lora_model import create_model
+    return create_model(argparse.Namespace(**train_args))
+
 def load_base_model(args, device):
     """
     Returns the embedding model whose last hidden layer is saved, together with its tokenizer.
 
     Without a model path this is the pretrained ESM of the given type. With one it is the base model
-    of a saved TokenClassifier, either pickled directly or saved via TokenClassifier.save().
+    of a saved TokenClassifier, pickled directly, saved via TokenClassifier.save(), or still inside
+    the LightningWrapper of the training loop in either form.
     """
     if not args.model_path:
         base, tokenizer = get_esm(args.type)
         return base.to(device), tokenizer
 
     # weights_only=False, the saved config is a pickled dataclass
-    saved = torch.load(args.model_path, weights_only=False, map_location=device)
+    saved = unwrap_training_module(torch.load(args.model_path, weights_only=False, map_location=device))
     if isinstance(saved, TokenClassifier):
         _, tokenizer = get_esm(saved.config.base_type)
         return saved.base.to(device), tokenizer
 
-    config, state_dict = saved['config'], saved['state_dict']
-    base, tokenizer = get_esm(config.base_type)
+    state_dict, config = saved['state_dict'], saved.get('config')
+    train_args = saved.get('hyper_parameters')
 
     if any('lora_' in key for key in state_dict):
-        # peft wraps the base model, the adapters have to be in place before the weights are loaded
-        from lora_model import LoRAClassifier
-        model = LoRAClassifier(config=config, base_model=base)
+        model, tokenizer = build_lora_classifier(config, train_args)
         model.load_state_dict(state_dict)
         return model.base.to(device), tokenizer
+
+    base, tokenizer = get_esm(saved_base_type(config, train_args, args))
 
     # Only the base model is needed, the classification head is not part of the embedding
     base_state = {key.removeprefix('base.') : value for key, value in state_dict.items()
@@ -329,7 +398,8 @@ if __name__ == '__main__':
     parser.add_argument('--out_folder', type=str, required=True,
                         help='Folder the per protein embedding files are written to.')
     parser.add_argument('--model_path', type=str, default=None,
-                        help='Saved TokenClassifier to take the base model from. Without it the pretrained model of --type is used.')
+                        help='Saved model to take the base model from, a TokenClassifier or a training checkpoint such as fold_N/best.ckpt. '
+                             'Without it the pretrained model of --type is used.')
     parser.add_argument('--type', type=str, default='650M',
                         help='ESM model type, used when no --model_path is given.')
     parser.add_argument('--residues', type=str, default=None,
