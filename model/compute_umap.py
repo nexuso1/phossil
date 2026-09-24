@@ -203,6 +203,79 @@ def load_site_labels(prot_info_path, protein_ids, protein_index, positions):
                         for index, position in zip(protein_index, positions)),
                        dtype=np.int8, count=len(positions))
 
+# Categorical slots for the residue letters, fixed so that a residue has the same color in every
+# plot. Only three hues stay distinguishable (also with color vision deficiencies) when every pair
+# of them can end up side by side, as in a scatter, so any other residue falls into a gray "Other".
+RESIDUE_COLORS = {'S' : '#2a78d6', 'T' : '#eb6834', 'Y' : '#1baf7a'}
+SITE_COLOR, BACKGROUND_COLOR = "#2ad672", '#c3c2b7'
+TEXT_PRIMARY, TEXT_SECONDARY, SPINE = '#0b0b0b', '#52514e', '#c3c2b7'
+
+def scatter_panel(ax, coords, groups, size, title):
+    """
+    One scatter of the projection. groups are (label, color, mask) pairs; every point is drawn in a
+    single call, in the order of coords, so no group hides another just by being drawn after it.
+    """
+    from matplotlib.lines import Line2D
+
+    colors = np.empty(len(coords), dtype=object)
+    for _, color, mask in groups:
+        colors[mask] = color
+
+    ax.scatter(coords[:, 0], coords[:, 1], s=size, c=list(colors), linewidths=0, alpha=0.6,
+               rasterized=True)
+    if len(groups) > 1:
+        handles = [Line2D([], [], linestyle='', marker='o', markersize=6, color=color,
+                          label=f'{label} ({mask.sum()})') for label, color, mask in groups]
+        ax.legend(handles=handles, loc='best', frameon=False, fontsize=9, labelcolor=TEXT_SECONDARY)
+
+    ax.set_title(title, loc='left', fontsize=11, color=TEXT_PRIMARY)
+    ax.set_xlabel('UMAP 1', color=TEXT_SECONDARY)
+    ax.set_ylabel('UMAP 2', color=TEXT_SECONDARY)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_aspect('equal', adjustable='datalim')
+    for spine in ax.spines.values():
+        spine.set_color(SPINE)
+
+def plot_projection(path, coords, letters, is_site, subtitle):
+    """
+    Saves the 2D projection colored by residue, and by known sites when they are available. Points
+    are drawn in a random order, except that the (rare) sites go on top of everything else.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    order = np.random.default_rng(0).permutation(len(coords))
+    size = float(np.clip(3e4 / len(coords), 0.3, 8))
+
+    panels = []
+    if len(np.unique(letters)) > 1:
+        present = [letter for letter in RESIDUE_COLORS if letter in letters]
+        others = ~np.isin(letters, present)
+        groups = [('Other', BACKGROUND_COLOR, others)] if others.any() else []
+        groups += [(letter, RESIDUE_COLORS[letter], letters == letter) for letter in present]
+        panels.append(('Residue', groups, order))
+    if is_site is not None:
+        is_site = is_site.astype(bool)
+        panels.append(('Known sites', [('Not a site', BACKGROUND_COLOR, ~is_site),
+                                       ('Site', SITE_COLOR, is_site)],
+                       order[np.argsort(is_site[order], kind='stable')]))
+    if not panels:
+        panels.append((f'Residue {letters[0]}, {len(coords)} residues',
+                       [(letters[0], SITE_COLOR, np.ones(len(coords), dtype=bool))], order))
+
+    fig, axes = plt.subplots(1, len(panels), figsize=(6.5 * len(panels), 6.2), squeeze=False)
+    fig.patch.set_facecolor('white')
+    for ax, (title, groups, draw_order) in zip(axes[0], panels):
+        groups = [(label, color, mask[draw_order]) for label, color, mask in groups]
+        scatter_panel(ax, coords[draw_order], groups, size, title)
+
+    fig.suptitle(subtitle, x=0.01, ha='left', fontsize=10, color=TEXT_SECONDARY)
+    fig.tight_layout()
+    fig.savefig(path, dpi=800, facecolor='white')
+    plt.close(fig)
+
 def compute_umap(args):
     files = list_embedding_files(args.embedding_folder)
     if args.splits:
@@ -278,6 +351,19 @@ def compute_umap(args):
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     np.savez_compressed(args.out, **arrays)
     print(f'Saved a {args.n_components}D projection of {total} residues to {args.out}')
+
+    if args.n_components == 2:
+        plot_path = os.path.splitext(args.out)[0] + '.png'
+        subtitle = f'{os.path.basename(os.path.normpath(args.embedding_folder))}, {total} residues'
+        if args.splits:
+            subtitle += f', {args.partition} partition of fold {args.fold}'
+        if args.pca_dim > 0:
+            subtitle += f', PCA to {args.pca_dim} dimensions'
+
+        plot_projection(plot_path, coords, letters, arrays.get('is_site'), subtitle)
+        print(f'Saved a plot of the projection to {plot_path}')
+    else:
+        print(f'Not plotting a {args.n_components}D projection, only 2D ones are plotted')
 
 def main(args):
     compute_umap(args)
