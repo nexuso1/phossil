@@ -30,7 +30,7 @@ class RecyclingClassifier(TokenClassifier):
         self.create_projection_layer(config)
         self.encoder = RecyclingEncoder(model_dim, config.n_heads, config.n_enc_layers, config.n_recycle_steps,
                                         dropout=config.dropout_rate, d_feedforward=config.dim_ffw,
-                                        swiglu=config.swiglu)
+                                        swiglu=config.swiglu, zero_init=config.zero_init)
         self.output = torch.nn.Linear(model_dim, config.n_labels)
 
     def create_projection_layer(self, config):
@@ -80,12 +80,12 @@ def add_arguments(parser):
     parser.add_argument('--n_heads', type=int, default=8)
     parser.add_argument('--n_recycle_steps', type=int, default=3)
     parser.add_argument('--n_enc_layers', type=int, default=3)
-    parser.add_argument('--dim_ffw', type=int, default=512)
+    parser.add_argument('--dim_ffw', type=int, default=1024)
     parser.add_argument('--dim_model', type=int, default= None)
     parser.add_argument('--use_cnn', type=bool, default=False)
     parser.add_argument('--kernel_size', type=int, default=15)
     parser.add_argument('--swiglu', action='store_true', default=False,
-                        help='Use a gated SwiGLU feedforward block in the encoder layers instead of the dense one.')
+                        help='Use a gated SwiGLU feedforward block in the encoder layers instead of the dense one. Projection size is 2/3 dim_ffw.')
     parser.add_argument('--zero_init', action='store_true', default=False, help='Use zeros as the first previous state while recycling, otherwise use inputs')
 def main(args):
     run_training(args, create_model)
