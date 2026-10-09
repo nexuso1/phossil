@@ -71,7 +71,7 @@ def create_model(args):
     config = RecyclingClassifierConfig(n_labels=1,loss=create_loss(args), base_type=args.type, n_recycle_steps=args.n_recycle_steps,
                                        n_heads = args.n_heads, n_enc_layers = args.n_enc_layers, dropout_rate=args.dropout,
                                        dim_ffw=args.dim_ffw, use_cnn=args.use_cnn, dim_model=args.dim_model,
-                                       swiglu=args.swiglu)
+                                       swiglu=args.swiglu, zero_init=args.zero_init, kernel_size=args.kernel_size)
     model = RecyclingClassifier(base_model=esm, config=config)
     model.set_base_requires_grad(False)
     return model, tokenizer
