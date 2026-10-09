@@ -14,7 +14,7 @@ class RecyclingClassifierConfig(TokenClassifierConfig):
     dim_ffw : int = 2048
     n_heads : int = 8
     n_enc_layers : int = 3
-    kernel_size = 31
+    kernel_size = 15
     use_cnn : bool = False
     # Use a gated SwiGLU feedforward block in the encoder layers instead of the dense one
     swiglu : bool = False
@@ -83,6 +83,7 @@ def add_arguments(parser):
     parser.add_argument('--dim_ffw', type=int, default=512)
     parser.add_argument('--dim_model', type=int, default= None)
     parser.add_argument('--use_cnn', type=bool, default=False)
+    parser.add_argument('--kernel_size', type=int, default=15)
     parser.add_argument('--swiglu', action='store_true', default=False,
                         help='Use a gated SwiGLU feedforward block in the encoder layers instead of the dense one.')
     parser.add_argument('--zero_init', action='store_true', default=False, help='Use zeros as the first previous state while recycling, otherwise use inputs')
