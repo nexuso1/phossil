@@ -373,7 +373,7 @@ class ResidualTransformerLayer(torch.nn.Module):
         return x
     
 class RecyclingEncoder(torch.nn.Module):
-    def __init__(self, d_model, nhead, num_layers, num_recycles, dropout, d_feedforward, swiglu=False):
+    def __init__(self, d_model, nhead, num_layers, num_recycles, dropout, d_feedforward, swiglu=False, zero_init=True):
         super().__init__()
         self.num_recycles = num_recycles
         self.layers = torch.nn.ModuleList([
@@ -381,11 +381,12 @@ class RecyclingEncoder(torch.nn.Module):
                                      swiglu=swiglu) for _ in range(num_layers)
         ])
         self.norm_final = torch.nn.LayerNorm(d_model)
+        self.zero_init = zero_init
         #self.initial_state = torch.nn.Parameter(torch.zeros(d_model))
 
     def forward(self, inputs, mask=None):
         # Initial 'prev_f' state (could be zeros or a copy of x)
-        prev_f = inputs
+        prev_f = torch.zeros_like(inputs) if self.zero_init else inputs
         for r in range(self.num_recycles + 1):
             # AF2 Gradient Detachment: Only the last cycle contributes to training
             if self.training and r < self.num_recycles:

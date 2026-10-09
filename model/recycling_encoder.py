@@ -18,7 +18,7 @@ class RecyclingClassifierConfig(TokenClassifierConfig):
     use_cnn : bool = False
     # Use a gated SwiGLU feedforward block in the encoder layers instead of the dense one
     swiglu : bool = False
-
+    zero_init : bool = False
     
 class RecyclingClassifier(TokenClassifier):
     def __init__(self, base_model, config):
@@ -85,7 +85,7 @@ def add_arguments(parser):
     parser.add_argument('--use_cnn', type=bool, default=False)
     parser.add_argument('--swiglu', action='store_true', default=False,
                         help='Use a gated SwiGLU feedforward block in the encoder layers instead of the dense one.')
-
+    parser.add_argument('--zero_init', action='store_true', default=False, help='Use zeros as the first previous state while recycling, otherwise use inputs')
 def main(args):
     run_training(args, create_model)
 
