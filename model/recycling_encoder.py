@@ -14,7 +14,7 @@ class RecyclingClassifierConfig(TokenClassifierConfig):
     dim_ffw : int = 2048
     n_heads : int = 8
     n_enc_layers : int = 3
-    kernel_size = 15
+    kernel_size : int = 15
     use_cnn : bool = False
     # Use a gated SwiGLU feedforward block in the encoder layers instead of the dense one
     swiglu : bool = False
