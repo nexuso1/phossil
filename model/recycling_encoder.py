@@ -5,7 +5,7 @@ from training import create_loss, run_training, parser
 from dataclasses import dataclass
 from token_classifier_base import TokenClassifierConfig, TokenClassifier
 from modules import RecyclingEncoder
-
+from ast import literal_eval
 
 @dataclass
 class RecyclingClassifierConfig(TokenClassifierConfig):
@@ -67,11 +67,11 @@ class RecyclingClassifier(TokenClassifier):
 
 def create_model(args):
     esm, tokenizer = get_esm(args.type)
-
+    unfreeze_indices = literal_eval(args.unfreeze_indices)
     config = RecyclingClassifierConfig(n_labels=1,loss=create_loss(args), base_type=args.type, n_recycle_steps=args.n_recycle_steps,
                                        n_heads = args.n_heads, n_enc_layers = args.n_enc_layers, dropout_rate=args.dropout,
                                        dim_ffw=args.dim_ffw, use_cnn=args.use_cnn, dim_model=args.dim_model,
-                                       swiglu=args.swiglu, zero_init=args.zero_init, kernel_size=args.kernel_size)
+                                       swiglu=args.swiglu, zero_init=args.zero_init, kernel_size=args.kernel_size, unfreeze_indices=unfreeze_indices)
     model = RecyclingClassifier(base_model=esm, config=config)
     model.set_base_requires_grad(False)
     return model, tokenizer
@@ -87,6 +87,7 @@ def add_arguments(parser):
     parser.add_argument('--swiglu', action='store_true', default=False,
                         help='Use a gated SwiGLU feedforward block in the encoder layers instead of the dense one. Projection size is 2/3 dim_ffw.')
     parser.add_argument('--zero_init', action='store_true', default=False, help='Use zeros as the first previous state while recycling, otherwise use inputs')
+
 def main(args):
     run_training(args, create_model)
 
