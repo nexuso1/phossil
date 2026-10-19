@@ -355,13 +355,10 @@ class ResidualTransformerLayer(torch.nn.Module):
         residual = x
         x = self.norm1(x)
 
-        # Some vals will become none otherwise, taken from ESM-2 repo
-        if mask is not None:
-            mask = mask.to(torch.float32)
-            mask = mask.masked_fill(
-                mask.to(torch.bool), -1e8 if x.dtype == torch.float32 else -1e4
-            )
-        attn_output, _ = self.self_attn(x, x, x, key_padding_mask=mask)
+        # mask is the HF attention mask (1 = token, 0 = padding), while key_padding_mask marks the
+        # keys to ignore with True
+        key_padding_mask = mask == 0 if mask is not None else None
+        attn_output, _ = self.self_attn(x, x, x, key_padding_mask=key_padding_mask)
         x = residual + self.dropout1(attn_output)
 
         # 2. Feedforward + Residual (Pre-LN style)
