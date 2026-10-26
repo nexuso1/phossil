@@ -28,6 +28,13 @@
 # metadata.json is deliberately left alone, so this can run while the same run is still training
 # other folds without the two racing for that file.
 #
+# Runs that predate the saving of validation predictions lack val_preds_fold_N.json, which
+# threshold_metrics.py tunes its threshold on. For such a fold the checkpoint is also evaluated on the
+# run's own dev partition (carved out of train exactly as in training when the splits have none), and
+#   val_preds_fold_N.json, val_preds_fold_N_stitched.json        as training writes them
+#   val_metrics_fold_N.json                                      val_* / stitched_val_* metrics
+# are written. Existing validation predictions are never overwritten.
+#
 # As a check that the model was restored correctly, the new logits are compared with the run's saved
 # test predictions on every position both test sets contain. They should agree up to float noise.
 #
@@ -56,7 +63,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from data_loading import load_prot_data, parse_residues, prep_batch
-from prot_dataset import ProteinDataset
+from prot_dataset import FullProteinDataset, ProteinDataset
 from training import LightningWrapper, create_metrics, parser as training_parser, prepare_model, save_predictions
 
 # Logit differences above this against the run's saved predictions mean the model was not restored
@@ -168,16 +175,30 @@ def evaluate_fold(args, module, prot_info, splits, run_info, run_splits, fold, r
     checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=False)
     wrapper.load_state_dict(checkpoint['state_dict'])
 
-    loader = DataLoader(test_ds, args.batch_size, shuffle=False, num_workers=num_workers,
-                        collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label,
-                                           modify_prob=0, kinases=args.kinase))
+    make_loader = partial(DataLoader, batch_size=args.batch_size, shuffle=False, num_workers=num_workers,
+                          collate_fn=partial(prep_batch, tokenizer=tokenizer, ignore_label=args.ignore_label,
+                                             modify_prob=0, kinases=args.kinase))
     # A single device: the multi-GPU deepspeed strategy of training is pointless for inference
     trainer = L.Trainer(logger=False, enable_checkpointing=False, devices=1, deterministic=True)
-    metrics = trainer.test(wrapper, loader, verbose=False)[0]
 
     columns = ['logits', 'labels', 'sequence_indices', 'df_index']
     if args.kinase:
         columns += ['kinase_logits']
+
+    val_metrics = None
+    if run_splits is not None and not os.path.exists(os.path.join(fold_dir, f'val_preds_fold_{fold}.json')):
+        # get_fold, so a dev partition carved out of train is the same one training used
+        _, dev_ds, _ = FullProteinDataset(run_info, run_splits, kinase=args.kinase).get_fold(fold)
+        wrapper.save_val_preds = True
+        val_metrics = trainer.validate(wrapper, make_loader(dev_ds), verbose=False)[0]
+        val_metrics.update(save_predictions(wrapper.val_preds, columns, dev_ds.data, fold_dir,
+                                            f'val_preds_fold_{fold}', args.ignore_label, prefix='stitched_val_'))
+        val_metrics = {k: float(v) for k, v in val_metrics.items()}
+        with open(os.path.join(fold_dir, f'val_metrics_fold_{fold}.json'), 'w') as f:
+            json.dump({'splits': args.dataset_path, 'prot_info': args.prot_info_path, 'checkpoint': ckpt_path,
+                       'chunks': len(dev_ds), 'metrics': val_metrics}, f, sort_keys=True, indent=4)
+
+    metrics = trainer.test(wrapper, make_loader(test_ds), verbose=False)[0]
     pred_name = f'{name}_preds_fold_{fold}'
     metrics.update(save_predictions(wrapper.test_preds, columns, test_ds.data, fold_dir, pred_name,
                                     args.ignore_label, prefix='stitched_test_'))
@@ -198,7 +219,7 @@ def evaluate_fold(args, module, prot_info, splits, run_info, run_splits, fold, r
     if run_splits is not None:
         own = run_info.loc[run_splits[fold]['test']]
         new_parents -= set(own['parent_id' if 'parent_id' in own else 'id'])
-    return metrics, check, len(new_parents)
+    return metrics, check, len(new_parents), val_metrics
 
 
 def main():
@@ -255,13 +276,14 @@ def main():
     prot_info = load_info(args.eval_prot_info)
     with open(args.eval_splits) as f:
         splits = json.load(f)
-    # The run's own splits, to compare against its saved predictions. Missing when the run was
-    # trained with paths that do not exist here.
+    # The run's own splits, to compare against its saved predictions and to find its dev partition.
+    # Missing when the run was trained with paths that do not exist here.
     run_splits, run_info = None, prot_info
+    skipped = 'skipping the comparison with the saved predictions and the saving of missing val predictions'
     if not os.path.exists(args.dataset_path):
-        print(f'{args.dataset_path} not found, skipping the comparison with the saved predictions')
+        print(f'{args.dataset_path} not found, {skipped}')
     elif args.prot_info_path != args.eval_prot_info and not os.path.exists(args.prot_info_path):
-        print(f'{args.prot_info_path} not found, skipping the comparison with the saved predictions')
+        print(f'{args.prot_info_path} not found, {skipped}')
     else:
         with open(args.dataset_path) as f:
             run_splits = json.load(f)
@@ -270,7 +292,7 @@ def main():
 
     failed = False
     for fold in folds:
-        metrics, check, n_new = evaluate_fold(args, module, prot_info, splits, run_info, run_splits, fold,
+        metrics, check, n_new, val_metrics = evaluate_fold(args, module, prot_info, splits, run_info, run_splits, fold,
                                               run_dir, name, cli.num_workers, whole_proteins)
         line = (f'fold {fold}: stitched_test_mcc={metrics["stitched_test_mcc"]:.4f}, '
                 f'{n_new} protein(s) not in the run\'s own test set')
@@ -283,6 +305,10 @@ def main():
                 if diff > MAX_LOGIT_DIFF:
                     line += '  <-- MISMATCH'
                     failed = True
+        if val_metrics is not None:
+            line += f'; saved missing val predictions (stitched_val_mcc={val_metrics["stitched_val_mcc"]:.4f})'
+        elif not os.path.exists(os.path.join(run_dir, f'fold_{fold}', f'val_preds_fold_{fold}.json')):
+            line += '; no val predictions, the run\'s splits are not available here'
         print(line)
 
     if failed:
