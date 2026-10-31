@@ -9,44 +9,6 @@ import os
 import json
 import argparse
 
-def plot_cluster_sizes(ax,  clusters, cmap='viridis', title=None):
-    cmap = colormaps['viridis']
-    counts = np.bincount(clusters.groupby('cluster_rep').count()['id'])
-    colors = np.zeros_like(counts, np.float32)
-    mask = counts > 0
-    nonzero = counts[mask]
-    nonzero = np.log(nonzero) / np.log(nonzero).max()
-    colors[mask] = nonzero
-    colors = cmap(colors)
-    ax.bar(np.arange(len(counts)), counts, color=colors)
-    ax.set_xlabel('Cluster size')
-    ax.set_ylabel('Frequency (log scale)')
-    ax.set_yscale('log')
-    ax.set_title(title)
-
-def plot_binned_cluster_dist(ax,  clusters, cmap='viridis', title=None):
-    cmap = colormaps['viridis']
-    group_sizes = clusters.groupby('cluster_rep').count().to_numpy().flatten()
-    bins = [1, 2, 3, 4, 5, 10, 20, 50, 100, 1000]
-    hist = np.histogram(group_sizes, bins=bins)
-    labels = [str(i) for i in bins[:-1]]
-    for i in range(4, len(labels) - 1):
-        labels[i] = labels[i] + '-' + labels[i + 1]
-
-    labels[-1] = labels[-1] + '+'
-    colors = cmap(hist[0] * 2 / np.sum(hist[0]))
-    ax.bar(labels, hist[0] / np.sum(hist[0]), color=colors)
-    ax.set_xlabel('Cluster size')
-    ax.set_ylabel('Percentage of data')
-    ax.set_title(title)
-
-def plot_info(data, path):
-    fig, ax = plt.subplots(1, 2, figsize=(13, 5))
-    plot_cluster_sizes(ax[0], data, title='Final cluster size distribution')
-    plot_binned_cluster_dist(ax[1], data, title='Final cluster size relative distribution')
-
-    plt.savefig(path)
-
 def prune_long_seqs(data : pd.DataFrame, max_length : int = 1023):
     return data[data['sequence'].apply(lambda x: len(x) < max_length)]
 
@@ -270,14 +232,13 @@ def extract_max_site_representatives(data : pd.DataFrame, sites_column='sites'):
 
     return data[data['parent_id'].isin(set(representatives))]
 
-def create_splits(prot_info_path, clusters_path, res_sets, out_folder=None, release=False, release_dev_size=0.2,
-                  train_size=0.8, suffix=''):
+def load_clustered_data(prot_info_path, clusters_path, res_sets):
+    """
+    The info file joined with its clustering, with the representatives reassigned and the sites
+    split per residue set: the frame every split is drawn from. Its index is the info file's.
+    """
     prot_info = pd.read_json(prot_info_path)
     clusters = pd.read_csv(clusters_path, sep='\t', names=['cluster_rep', 'cluster_mem'])
-
-    clusters_name = Path(clusters_path).stem
-    out_folder = f'../data/dataset_{clusters_name}' if not out_folder else out_folder
-    os.makedirs(out_folder, exist_ok=True)
 
     # Chunked datasets are clustered and split by the protein a chunk came from
     prot_info = add_chunk_columns(prot_info)
@@ -291,14 +252,18 @@ def create_splits(prot_info_path, clusters_path, res_sets, out_folder=None, rele
     # Find the longest member of the cluster that is inside prot_info, and assign it as the representative
     joined = reassign_representatives(joined)
 
-    # Plot cluster size distribution
-    # plot_name = 'cluster_dist.png'
-    # plot_info(joined, os.path.join(out_folder, plot_name))
-
-
     # Split sites according to residues in res_sets
     set_labels = ["".join(sorted(list(res_set))) for res_set in res_sets]
-    joined = compute_site_labels(joined, res_sets, set_labels)
+    return compute_site_labels(joined, res_sets, set_labels)
+
+def create_splits(prot_info_path, clusters_path, res_sets, out_folder=None, release=False, release_dev_size=0.2,
+                  train_size=0.8, suffix=''):
+    clusters_name = Path(clusters_path).stem
+    out_folder = f'../data/dataset_{clusters_name}' if not out_folder else out_folder
+    os.makedirs(out_folder, exist_ok=True)
+
+    joined = load_clustered_data(prot_info_path, clusters_path, res_sets)
+    set_labels = ["".join(sorted(list(res_set))) for res_set in res_sets]
 
     # Compute length labels for stratification
     joined = compute_length_labels(joined)
@@ -334,7 +299,7 @@ if __name__ == '__main__':
     parser.add_argument('--release', action='store_true')
     parser.add_argument('--out_folder', type=str, help='Output folder', default='../data/dbptm')
     parser.add_argument('--release_dev_size', type=float, help='Release dataset dev size', default=0.2)
-    parser.add_argument('--suffix', type=str, help='Suffix for the splits filename.', default='')
+    parser.add_argument('--suffix', type=str, help='Suffix for the splits filename.', default='_chunked')
     parser.add_argument('--train_size', type=float, default=0.8,
                         help='Fraction of the train partition of each fold kept for training, the rest becomes the dev partition.')
     args = parser.parse_args()
