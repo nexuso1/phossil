@@ -7,6 +7,7 @@
 # see save_protein for what exactly is written.
 
 import argparse
+import json
 import numpy as np
 import os
 import pandas as pd
@@ -48,6 +49,33 @@ def add_chunk_columns(data : pd.DataFrame):
         data['parent_length'] = data['sequence'].apply(len)
 
     return data
+
+def select_split(data : pd.DataFrame, splits_path, fold, partition):
+    """
+    The chunks of the proteins in one partition of one fold of a splits file. The splits hold index
+    labels into the info file, but dataset creation drops the chunks without a site of the residue
+    set, so a long protein can be listed with only some of its chunks. Every chunk of a listed
+    protein is taken, otherwise stitching would leave holes in its embeddings and sequence.
+    """
+    with open(splits_path) as f:
+        splits = json.load(f)
+
+    if not 0 <= fold < len(splits):
+        raise SystemExit(f'{splits_path} has {len(splits)} folds, there is no fold {fold}')
+    if partition not in splits[fold]:
+        raise SystemExit(f'Fold {fold} of {splits_path} has no {partition} partition')
+
+    labels = pd.Index(splits[fold][partition])
+    missing = labels.difference(data.index)
+    if len(missing):
+        raise SystemExit(f'{len(missing)} labels of the {partition} partition are not in the info file, '
+                         'the splits file was not generated from it')
+
+    parents = set(data.loc[labels, 'parent_id'])
+    selected = data[data['parent_id'].isin(parents)]
+    print(f'Embedding {len(parents)} proteins of the {partition} partition of fold {fold}, '
+          f'{len(selected)} chunks ({len(selected) - len(labels)} not listed in the split)')
+    return selected
 
 def parse_layers(layer_string : str):
     """
@@ -341,6 +369,11 @@ def save_protein(protein_id, chunks : list[Chunk], parent_length, out_folder, dt
     return len(positions)
 
 def compute_embeddings(args):
+    # Before the model, so that a wrong fold or partition fails without waiting for it to load
+    data = add_chunk_columns(pd.read_json(args.prot_info).dropna())
+    if args.splits:
+        data = select_split(data, args.splits, args.fold, args.partition)
+
     device = torch.device(args.device)
     base, tokenizer = load_base_model(args, device)
     base.eval()
@@ -352,7 +385,6 @@ def compute_embeddings(args):
         print(f'Saving the attention weights of layers {attention_layers}. They are quadratic in the '
               'sequence length, lower --batch_size if the run runs out of memory')
 
-    data = add_chunk_columns(pd.read_json(args.prot_info).dropna())
     os.makedirs(args.out_folder, exist_ok=True)
 
     residues = set(parse_residues(args.residues)) if args.residues else None
@@ -395,6 +427,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Compute last hidden layer embeddings of a protein dataset.')
     parser.add_argument('--prot_info', type=str, default='../data/dbptm/dbptm_info_chunked.json',
                         help='Path to the protein info file, a dataframe with columns ("id", "sequence").')
+    parser.add_argument('--splits', type=str, default=None,
+                        help='Splits file generated from --prot_info. When given, only the proteins of --partition of --fold are embedded, every chunk of them.')
+    parser.add_argument('--fold', type=int, default=0, help='Fold of --splits to take the proteins from.')
+    parser.add_argument('--partition', type=str, default='test', choices=['train', 'dev', 'test', 'total'],
+                        help='Partition of --fold to take the proteins from.')
     parser.add_argument('--out_folder', type=str, required=True,
                         help='Folder the per protein embedding files are written to.')
     parser.add_argument('--model_path', type=str, default=None,
