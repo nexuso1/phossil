@@ -111,6 +111,19 @@ with `dataset_info*.csv` and `site_increase.csv`.
   every chunk of each listed protein, including the site-less chunks the splits leave out, and
   `compute_umap.py` matches the `<parent_id>.npz` file names. A missing partition (e.g. no `dev`)
   is an error; neither script carves dev out of train.
+- `scripts/identity_significance_test.py` — Nadeau-Bengio corrected t-tests (Benjamini-Hochberg
+  over the three pairs) between one run family's 30/50/70 % identity versions (`--run` template, as in
+  `table_identity_versions.py`), recomputed from the stitched test predictions, written to
+  `data/statistical_tests`. The versions use different splits, so `model/significance_test.py`'s
+  paired tests do not apply and pairing folds by index is arbitrary. `scripts/plot_identity_significance.py`
+  plots those results to `img/identity_significance.{png,pdf}`, marking significance by the BH p only.
+  The paired alternative is a cross-evaluation: the 30/50/70 % clusterings nest (every 70 % cluster
+  inside one 50 % and one 30 % cluster), and `scripts/identity_cross_splits.py` writes the higher
+  versions' test sets over the lower versions' folds (`splits_<res>_<hi>_test_in_<lo>_folds.json`)
+  and the 30 % test proteins none of the 50/70 % folds that would score them has a 30 % homolog of
+  (`splits_<res>_chunked_max_leakfree*.json`, ~70 % of them, biased towards small families). After
+  `evaluate_checkpoints.py` on those, `scripts/identity_cross_significance.py` runs the cell-based
+  paired tests of `cross_representative_significance.py` with BH over each family of three pairs.
 - `scripts/phosf3c_dataset.py` — exports a dataset into the FASTA-with-`#` format PhosF3C trains on.
 - `scripts/plot_site_counts.py` — regenerates the positive-site-count figure in `img/`.
 - `scripts/plot_architectures.py` — writes `img/finetuning_architectures.svg` (surgical finetuning,
@@ -208,6 +221,9 @@ other file's fold-N train set. Never evaluate fold N of one variant on fold N of
 `scripts/cross_representative_splits.py` instead redistributes one variant's test proteins over the
 other's folds by cluster, writing `splits_<res>_<test>_test_in_<folds>_folds.json` (e.g.
 `splits_S_chunked_max_test_in_chunked_folds.json`) for `evaluate_checkpoints.py --splits`.
+`scripts/cross_representative_significance.py` then runs `model/significance_test.py` on such a
+pair, regrouping both runs' predictions into the 25 (own fold, other fold) cells so each metric
+still comes from one model per run; its corrected t-test column does not apply to cells.
 
 ### Outputs of a run
 
