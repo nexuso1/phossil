@@ -124,6 +124,22 @@ with `dataset_info*.csv` and `site_increase.csv`.
   (`splits_<res>_chunked_max_leakfree*.json`, ~70 % of them, biased towards small families). After
   `evaluate_checkpoints.py` on those, `scripts/identity_cross_significance.py` runs the cell-based
   paired tests of `cross_representative_significance.py` with BH over each family of three pairs.
+- `model/demo_evaluation.py` — per-protein demo evaluation of a run family (`--run
+  'finetuning_drop_{res}_2_650M_dbptm_{variant}'`, over the S/T/Y runs and the 30/50/70 % versions)
+  on a fixed list of well-known phosphoproteins (`DEMO`: EGFR, AKT1, SRC, ERK2, TP53, APP, tau, RB1,
+  β-catenin, p27, EPOR, STAT5B, BAD) and their canonical sites, which are checked against the sequence.
+  Each protein is scored by the fold that trained on neither it nor its cluster at the run's identity
+  level: its own test fold, or the fold whose test set holds its cluster's representative. Most of these
+  proteins are no representative at 30/50 %. Predictions come from saved files (`demo_preds_*`, then
+  evaluate_checkpoints' `*_whole_preds_*`, then the partial `test_preds_*`); `--predict` runs the chosen
+  `best.ckpt` for the rest, checking the restored model against a saved test protein first. Writes
+  `data/demo_eval/<template>/{sites,proteins,canonical}.csv`; S and T runs are also pooled as `S+T`.
+  The canonical site list was written from memory, not taken from a source: `model/demo_site_references.py`
+  looks each site up in UniProt's Modified residue features (following "by similarity" evidence into
+  the ortholog by alignment), caches the entries in `data/demo_eval/uniprot/`, and writes
+  `data/demo_eval/canonical_references.csv` (merged into `canonical.csv`) and `references.csv`.
+  Sites without any UniProt Modified residue annotation were dropped from the list (AKT1 Y315/Y326,
+  TP53 S6/T81, β-catenin Y86/Y654); keep it that way when adding sites.
 - `scripts/phosf3c_dataset.py` — exports a dataset into the FASTA-with-`#` format PhosF3C trains on.
 - `scripts/plot_site_counts.py` — regenerates the positive-site-count figure in `img/`.
 - `scripts/plot_architectures.py` — writes `img/finetuning_architectures.svg` (surgical finetuning,
@@ -214,6 +230,12 @@ the representative assigned by the clustering (`splits_<label>.json`), and the c
 the most sites of that residue set (`splits_<label>_max.json`). The `_max` variant also recovers
 clusters whose assigned representative has no site of the residue set at all, which the default
 strategy drops entirely. `site_increase.csv` quantifies the difference.
+
+The clustering is connected-component (`--cluster-mode 1`) with no coverage requirement (`-c 0`), so
+single shared domains chain proteins together. At 30 % this makes one cluster (`A6NDX5`) of 22,831 of
+the 60,176 dbPTM proteins, holding most kinases and signalling proteins (EGFR, AKT1, ERK2, SRC, APP),
+and it enters the splits as one representative, titin. At 50 % the largest cluster has 1,363 proteins
+(mostly C2H2 zinc fingers); at 70 % there is no outlier (largest 87).
 
 The two files share their clusters but **not their folds**: each is split by its own
 `StratifiedKFold`, so only ~1/5 of fold N's test clusters coincide and most of the rest are in the
