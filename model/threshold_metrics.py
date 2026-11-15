@@ -45,7 +45,7 @@ def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 
-def _flatten_predictions(pred_df, ignore_label=-1):
+def flatten_predictions(pred_df, ignore_label=-1):
     """Flattens a per-chunk (or per-protein) prediction frame into 1-D logit/label arrays.
 
     Saved predictions already drop ignored positions, but the filter is kept so the function is
@@ -136,7 +136,7 @@ def metrics_at_threshold(logits, labels, threshold, prefix="", ignore_index=-1):
     return out
 
 
-def _read_preds(fold_dir, split, level):
+def read_preds(fold_dir, split, level):
     """Loads a prediction frame or returns None if that file does not exist.
 
     split: "val" | "test"; level: "chunk" (per-chunk) | "stitched" (per-protein).
@@ -150,26 +150,34 @@ def _read_preds(fold_dir, split, level):
     return pd.read_json(path)
 
 
+def tune_fold_threshold(fold_dir, ignore_label=-1, threshold_level="stitched"):
+    """MCC-optimal threshold of one fold, tuned on its validation predictions at `threshold_level`
+    (falling back to the chunk level if the stitched file is absent). None if there is no validation
+    prediction file to tune on.
+    """
+    tune_df = read_preds(fold_dir, "val", threshold_level)
+    if tune_df is None:
+        tune_df = read_preds(fold_dir, "val", "chunk")
+    if tune_df is None:
+        return None
+
+    tune_logits, tune_labels = flatten_predictions(tune_df, ignore_label)
+    threshold, _ = optimal_mcc_threshold(tune_logits, tune_labels)
+    return threshold
+
+
 def compute_fold_threshold_metrics(fold_dir, ignore_label=-1, threshold_level="stitched"):
     """Optimal-threshold metrics for a single fold directory.
 
-    The threshold is chosen on the validation predictions at `threshold_level` (falling back to the
-    chunk level if the stitched file is absent), then applied to every available split/level.
+    The threshold is chosen on the validation predictions (see tune_fold_threshold), then applied to
+    every available split/level.
 
     Returns (val_updates, test_updates) — dicts of new metric keys — or (None, None) if the fold has
     no validation predictions to tune on.
     """
-    # Pick the threshold on validation, preferring the requested level.
-    tune_df = _read_preds(fold_dir, "val", threshold_level)
-    tune_level = threshold_level
-    if tune_df is None:
-        tune_df = _read_preds(fold_dir, "val", "chunk")
-        tune_level = "chunk"
-    if tune_df is None:
+    threshold = tune_fold_threshold(fold_dir, ignore_label, threshold_level)
+    if threshold is None:
         return None, None
-
-    tune_logits, tune_labels = _flatten_predictions(tune_df, ignore_label)
-    threshold, _ = optimal_mcc_threshold(tune_logits, tune_labels)
 
     # Metric-key prefixes mirror the ones the training loop already writes.
     level_prefix = {"chunk": "", "stitched": "stitched_"}
@@ -177,10 +185,10 @@ def compute_fold_threshold_metrics(fold_dir, ignore_label=-1, threshold_level="s
 
     for split in ("val", "test"):
         for level, sp in level_prefix.items():
-            df = _read_preds(fold_dir, split, level)
+            df = read_preds(fold_dir, split, level)
             if df is None:
                 continue
-            logits, labels = _flatten_predictions(df, ignore_label)
+            logits, labels = flatten_predictions(df, ignore_label)
             if logits.size == 0:
                 continue
             updates[split].update(
@@ -190,7 +198,7 @@ def compute_fold_threshold_metrics(fold_dir, ignore_label=-1, threshold_level="s
     return updates["val"], updates["test"]
 
 
-def _mean_over_folds(fold_dicts):
+def mean_over_folds(fold_dicts):
     """Mean of every numeric key over the folds that actually hold metrics."""
     sums, counts = {}, {}
     for fold in fold_dicts:
@@ -266,8 +274,8 @@ def update_experiment_metadata(exp_dir, threshold_level="stitched", dry_run=Fals
                 folds[fold].update(update)
 
     # Keep the stored averages consistent with the freshly added per-fold keys.
-    data["val_metric_avg"] = _mean_over_folds(data.get("val_metrics", []))
-    data["test_metric_avg"] = _mean_over_folds(data.get("test_metrics", []))
+    data["val_metric_avg"] = mean_over_folds(data.get("val_metrics", []))
+    data["test_metric_avg"] = mean_over_folds(data.get("test_metrics", []))
 
     if not dry_run:
         with open(meta_path, "w") as f:
