@@ -43,7 +43,9 @@ have an empty `prob`. With --predict, every protein without a complete source is
 stitched.json in that fold directory, which later invocations pick up. Copy those files into
 logs/<run>/fold_N/ to use them on a machine without the checkpoints. As a check that the model was
 restored correctly, a protein of the fold's own test set is predicted alongside and compared with
-the saved test predictions.
+the saved test predictions. The control must have every one of its chunks in the test list: the
+residue filter drops site-less chunks from the splits, and a protein missing some would be stitched
+from different chunks here than in the saved predictions, which differ by more than restoring noise.
 
 Calls use the fold's validation-tuned `opt_threshold` (threshold_metrics.py), or 0.5 where the run
 has none (`threshold_source`).
@@ -168,6 +170,12 @@ class ProteinInfo:
                 sites |= {row.offset + s - 1 for s in row.sites if row.sequence[s - 1] in 'STY'}
             self.sequence[pid] = ''.join(seq)
             self.sites[pid] = sites
+
+    def complete_in(self, labels):
+        """Proteins every chunk of which is among the info file index `labels`."""
+        listed = self.parent_of.loc[list(labels)].value_counts()
+        total = self.parent_of.value_counts()
+        return set(listed.index[listed == total.loc[listed.index]])
 
     def chunks_of(self, proteins, residues, ignore_index):
         """Every chunk of `proteins`, labelled for `residues`."""
@@ -449,7 +457,10 @@ def evaluate_run(run, variant, residue, cli, roots, info_cache, clusters, member
             control = None
             if os.path.exists(saved):
                 saved_ids = pd.read_json(saved)['id']
-                control = next((p for p in saved_ids if p not in DEMO), None)
+                # predict_fold runs every chunk, so a control with chunks missing from the test
+                # list would be stitched differently than in the saved predictions
+                complete = info.complete_in(splits[fold]['test'])
+                control = next((p for p in saved_ids if p not in DEMO and p in complete), None)
             print(f'{run} fold {fold}: predicting {", ".join(DEMO[p][0] for p in proteins)} with {entry}')
             stitched, control_pred = predict_fold(run, ckpt_run_dir, fold, metadata, entry, info, proteins,
                                                   control, cli.batch_size)
@@ -460,7 +471,8 @@ def evaluate_run(run, variant, residue, cli, roots, info_cache, clusters, member
                     raise SystemExit(f'{run} fold {fold} does not reproduce its saved test predictions; '
                                      f'check --entry ({entry}) and the checkpoint')
             else:
-                print(f'  no saved test predictions of fold {fold} to check the restored model against')
+                print(f'  no saved test prediction of a protein with all its chunks in fold {fold}\'s test list '
+                      f'to check the restored model against')
             files.forget(save_demo_predictions(os.path.join(ckpt_run_dir, f'fold_{fold}'), fold, stitched))
         todo = {}
         for pid in DEMO:
