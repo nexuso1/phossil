@@ -1,8 +1,9 @@
 """Literature references for the canonical sites of demo_evaluation.py, from UniProt.
 
-The canonical sites in demo_evaluation.DEMO only name rows of its output; the labels it scores come
-from dbPTM. This script looks every canonical site up in the "Modified residue" features of its
-UniProtKB entry and collects the evidence behind it:
+The canonical sites of demo_evaluation (the sites labelled functional in mutagenesis_labels.csv, see
+demo_mutagenesis.py) only name rows of its output; the labels it scores come from dbPTM. This script
+looks every canonical site up in the "Modified residue" features of its UniProtKB entry and collects
+the evidence behind it:
 
     experimental     ECO:0000269, a paper characterising the site (PubMed)
     large-scale      ECO:0007744, a phosphoproteomics study (PubMed)
@@ -35,7 +36,7 @@ import pandas as pd
 from Bio import Align
 from Bio.Align import substitution_matrices
 
-from demo_evaluation import DEMO, resolve_sites
+from demo_evaluation import DEMO, demo_sequences, resolve_sites
 
 UNIPROT = 'https://rest.uniprot.org'
 EVIDENCE_CLASS = {'ECO:0000269': 'experimental', 'ECO:0007744': 'large-scale', 'ECO:0000250': 'by similarity',
@@ -141,14 +142,14 @@ def main():
     cli = parser.parse_args()
 
     cache = Cache(os.path.join(cli.out_dir, 'uniprot'), cli.refresh)
-    info = pd.read_json(cli.info).set_index('id')
+    sequences = demo_sequences(cli.info)
 
     site_rows, cited = [], {}
-    for accession, (name, specs) in DEMO.items():
-        sequence = info.loc[accession, 'sequence']
+    for accession, (name, _) in DEMO.items():
+        sequence = sequences[accession]
         if cache.entry(accession)['sequence']['value'] != sequence:
             raise SystemExit(f'{accession}: the UniProt sequence differs from the info file, positions would not match')
-        for position, label in resolve_sites(name, sequence, specs):
+        for position, label in resolve_sites(accession, sequence):
             description, evidence = site_evidence(cache, accession, position)
             evidence = evidence or []
             # Strongest final evidence first; at equal strength direct evidence before inherited
