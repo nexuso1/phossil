@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <meta name="description" content="" />
+    <meta name="author" content="" />
+    <!--[if IE]>
+        <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+        <![endif]-->
+    <title>dbPTM</title>
+    <!-- BOOTSTRAP CORE STYLE  -->
+    <link href="assets/css/bootstrap.css" rel="stylesheet" />
+    <!-- FONT AWESOME STYLE  -->
+    <link href="assets/css/fontawesome-all.css" rel="stylesheet" />
+    <!-- DATATABLE STYLE  -->
+    <link href="assets/js/dataTables/dataTables.bootstrap.css" rel="stylesheet" />
+    <!-- CUSTOM STYLE  -->
+    <link href="assets/css/style.css" rel="stylesheet" />
+    <!-- GOOGLE FONT -->
+    <link href='https://fonts.googleapis.com/css?family=Open+Sans' rel='stylesheet' type='text/css' />
+
+</head>
+
+
+<body>
+	<!--MENU SECTION START-->
+	
+
+
+    <section class="menu-section">
+        <div class="container">
+            <div class="row ">
+                <div class="col-md-12">
+		    <div class="navbar-header">
+		        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                        <span class="icon-bar"></span>
+                	</button>
+                        <a class="navbar-brand" href="index.php">
+                            <img src="assets/img/logo.png" />
+                        </a>
+		    </div>
+                    <div class="navbar-collapse collapse ">
+                        <ul id="menu-top" class="nav navbar-nav navbar-right">
+                            <!-- <li><a href="index.php" class="">Home</a></li> -->
+                            <li><a href="statistics.php" class="">Statistics</a></li>
+                            <li><a href="search.php" class="">Search</a></li>
+                            <li>
+                                <a href="#" class="dropdown-toggle" id="ddlmenuItem" data-toggle="dropdown">Browse <i class="fa fa-angle-down"></i></a>
+                                <ul class="dropdown-menu" role="menu" aria-labelledby="ddlmenuItem">
+                                    <!--<li role="presentation"><a role="menuitem" tabindex="-1" href="http://140.138.144.141/~dbptm/browse_site.php">Protein & Site</a></li>-->
+				    <li role="presentation"><a role="menuitem" tabindex="-1" href="browse_site.php" class="">Substrate Protein</a></li>
+                                    <li role="presentation"><a role="menuitem" tabindex="-1" href="browse_type.php" class="">PTM General Information</a></li>
+                                </ul>
+                            </li>
+                            <li>
+                                <a href="#" class="dropdown-toggle" id="ddlmenuItem" data-toggle="dropdown">Analysis <i class="fa fa-angle-down"></i></a>
+                                <ul class="dropdown-menu" role="menu" aria-labelledby="ddlmenuItem">
+                                <li role="presentation"><a role="menuitem" tabindex="-1" href="snpptm.php">Disease-associated PTMs based on nsSNP Annotation</a></li>
+                                <li role="presentation"><a role="menuitem" tabindex="-1" href="crosstalk.php">PTMs Cross-talk Analysis</a></li>
+                                <li role="presentation"><a role="menuitem" tabindex="-1" href="drugptm.php">Drug Binding-associated PTM sites</a></li>
+                                <li style="position: relative; padding-right: 30px;" role="presentation"><a role="menuitem" tabindex="-1" href="kinase.php">Kinase activity profiles</a>
+                                    <img src="assets/img/new.png" alt="New" class="new-icon" />
+                                </li>
+                                </ul>
+                                <style>
+                                    .new-icon {
+                                        position: absolute;
+                                        top: 0;        /* Stick to the top */
+                                        right: 0;      /* Stick to the right */
+                                        width: 50px;   /* Adjust the size as needed */
+                                        height: 50px;  /* Adjust the size as needed */
+                                    }
+                                </style>
+
+                            </li>
+                            <li><a href="portal.php" class="">Resource</a></li>
+                            <li><a href="download.php" class="">Download</a></li>
+                            <li><a href="tutorial.php" class="">Tutorial</a></li>
+                            <!--<li><a href="tutorial.php">Tutorial</a></li>-->
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+	<!--MENU SECTION END-->
+
+<title>TFEB_HUMAN - dbPTM</title>	<script type="text/javascript">
+		function loadNetworkPage() {
+			var iframeurl = window.location.href.replace("info.php", "networkpro.php");
+			var ele = document.getElementById("networkFrame");
+			ele.onload = function() {
+				document.getElementById("networkLoading").style.display = "none";
+			}
+			if(ele.src !== iframeurl){
+				ele.src = iframeurl;
+			}
+			ele = null;
+		}
+	</script>
+    <div class="content-wrapper">
+    	<div class="container">
+			<!--ROW:PTM INFO START-->
+            <div class="row">
+                <div class="col-md-12 col-sm-12">
+                    <div class="panel panel-primary">
+                        <div class="panel-heading">
+                            TFEB_HUMAN - PTM Information in dbPTM                        </div>
+                        <div class="panel-body">
+                            <ul class="nav nav-tabs">
+                                <li class="active"><a href="#info" data-toggle="tab">Information</a></li>
+                                <li class=""><a href="#exp" data-toggle="tab">Experimental PTM Sites</a></li>
+								<li class=""><a href="#upstream" data-toggle="tab">Upstream Regulatory Proteins</a></li>
+								<li class=""><a href="#ppi" data-toggle="tab">Interacting Proteins</a></li>
+								<li class="" onclick="loadNetworkPage()"><a href="#network" data-toggle="tab">Regulatory Network</a></li>
+								<li class=""><a href="#description" data-toggle="tab">Functions of PTM Sites</a></li>
+								<li class=""><a href="#snpptm" data-toggle="tab">Disease-associated PTM Sites by SAP</a></li>
+                                <li class=""><a href="#drugdisease" data-toggle="tab">Drug & Disease Associations</a></li>
+                                <li class=""><a href="#literature" data-toggle="tab">Literatures</a></li>
+                            </ul>
+
+                            <div class="tab-content">
+    							<!-- BASIC INFORMATION START-->
+                                <div class="tab-pane fade active in" id="info">
+                    		    	<div class="panel panel-default">
+                        				<div class="panel-heading">Basic Information of Protein</div>
+                        				<div class="panel-body">
+                            		    	<div class="table-responsive">
+                                				<table class="table table-hover" style="table-layout:fixed; word-wrap:break-word;">
+													<tbody>
+														<tr>
+															<th width="15%">UniProt ID</th>
+															<td><a href='https://www.uniprot.org/uniprot/TFEB_HUMAN' target='_blank'>TFEB_HUMAN</a></td>
+															<td rowspan="6" width="30%" align="right" valign="top"> <br>
+																<h5 style ="margin-top:-25px">
+																	<script language="JavaScript" type="text/javascript" src="jsmol/JSmol.min.js"></script>
+																	<script language="JavaScript">
+																	var Info = {width: 300,height: 300,color: "black",serverURL: "jsmol/php/jsmol.php",use: "HTML5 WEBGL JAVA",j2sPath: "jsmol/j2s",
+																	script: "load 'temp/.pdb.gz'; select all;wireframe 0;spacefill off;cartoon on;select helix;color [0,239,239];select sheet;color [231,0,231];color yellow; spin on",console: 'jmolApplet0_infodiv}'																	}
+																	</script>
+																																	</h5>
+															</td>
+														</tr>
+														<tr>
+															<th>UniProt AC</th>
+															<td>P19484</td>
+														</tr>
+														<tr>
+															<th>Protein Name</th>
+															<td>Transcription factor EB</td>
+														</tr>
+														<tr>
+															<th>Gene Name</th>
+															<td>TFEB</td>
+														</tr>
+														<tr>
+															<th>Organism</th>
+															<td>Homo sapiens (Human).  </td>
+														</tr>
+														<tr>
+															<th>Sequence Length</th>
+															<td>476</td>
+														</tr>
+														<tr>
+															<th>Subcellular Localization</th>
+															<td colspan="2">
+																Cytoplasm . Nucleus . Mainly present in the cytoplasm (PubMed:23434374). Under aberrant lysosomal storage conditions, it translocates from the cytoplasm to the nucleus (PubMed:23434374). In macrophages, translocates into the nucleus upon live S.enter															</td>
+														</tr>
+														<tr>
+															<th>Protein Description</th>
+															<td colspan="2">
+																Transcription factor that specifically recognizes and binds E-box sequences (5'-CANNTG-3'). Efficient DNA-binding requires dimerization with itself or with another MiT/TFE family member such as TFE3 or MITF. In association with TFE3, activates the expression of CD40L in T-cells, thereby playing a role in T-cell-dependent antibody responses in activated CD4(+) T-cells and thymus-dependent humoral immunity. Specifically recognizes and binds the CLEAR-box sequence (5'-GTCACGTGAC-3') present in the regulatory region of many lysosomal genes, leading to activate their expression. It thereby plays a central role in expression of lysosomal genes. Acts as a positive regulator of autophagy by promoting expression of genes involved in autophagy. Specifically recognizes the gamma-E3 box, a subset of E-boxes, present in the heavy-chain immunoglobulin enhancer. Plays a role in the signal transduction processes required for normal vascularization of the placenta..															</td>
+														</tr>
+														<tr>
+															<th>Protein Sequence</th>
+															<td colspan="2">MASRIGLRMQLMREQAQQEEQRERMQQQAVMHYMQQQQQQQQQQLGGPPTPAINTPVHFQSPPPVPGEVLKVQSYLENPTSYHLQQSQHQKVREYLSETYGNKFAAHISPAQGSPKPPPAASPGVRAGHVLSSSAGNSAPNSPMAMLHIGSNPERELDDVIDNIMRLDDVLGYINPEMQMPNTLPLSSSHLNVYSSDPQVTASLVGVTSSSCPADLTQKRELTDAESRALAKERQKKDNHNLIERRRRFNINDRIKELGMLIPKANDLDVRWNKGTILKASVDYIRRMQKDLQKSRELENHSRRLEMTNKQLWLRIQELEMQARVHGLPTTSPSGMNMAELAQQVVKQELPSEEGPGEALMLGAEVPDPEPLPALPPQAPLPLPTQPPSPFHHLDFSHSLSFGGREDEGPPGYPEPLAPGHGSPFPSLSKKDLDLMLLDDSLLPLASDPLLSTMSPEASKASSRRSSFSMEEGDVL</td>
+														</tr>
+														<tr align='center'>
+															<th colspan='3'>Overview of Protein Modification Sites with Functional and Structural Information</th>
+														</tr>
+														<tr>
+															<td colspan='3'>
+																<div style='overflow-x:scroll;white-space: nowrap;'><img src='info_image.php?ID=TFEB_HUMAN&scale=8&width=3868&height=590' width='auto' height='590' border='0' name='image1' usemap='#ImageMap' SCROLLING='yes'></img><map name='ImageMap'><area shape='rect' coords='57.5,45,62.5,105' title='Phosphorylation
+at position 3' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=-' target='_blank'><area shape='rect' coords='97.5,45,102.5,105' title='
+Methylation
+at position 8' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=-' target='_blank'><area shape='rect' coords='297.5,45,302.5,105' title='Phosphorylation
+at position 33' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=54559935' target='_blank'><area shape='rect' coords='433.5,45,438.5,105' title='Phosphorylation
+at position 50' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231' target='_blank'><area shape='rect' coords='473.5,45,478.5,105' title='Phosphorylation
+at position 55' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=28348404' target='_blank'><area shape='rect' coords='521.5,45,526.5,105' title='Phosphorylation
+Phosphorylation
+at position 61' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=28348404' target='_blank'><area shape='rect' coords='625.5,45,630.5,105' title='Phosphorylation
+at position 74' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=-' target='_blank'><area shape='rect' coords='761.5,45,766.5,105' title='Ubiquitination
+at position 91' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231' target='_blank'><area shape='rect' coords='793.5,45,798.5,105' title='Phosphorylation
+at position 95' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=25056879' target='_blank'><area shape='rect' coords='809.5,45,814.5,105' title='Phosphorylation
+at position 97' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=-' target='_blank'><area shape='rect' coords='825.5,45,830.5,105' title='Phosphorylation
+at position 99' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=-' target='_blank'><area shape='rect' coords='833.5,45,838.5,105' title='Phosphorylation
+at position 100' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419' target='_blank'><area shape='rect' coords='905.5,45,910.5,105' title='Phosphorylation
+at position 109' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419' target='_blank'><area shape='rect' coords='921.5,45,926.5,105' title='Phosphorylation
+at position 111' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=-' target='_blank'><area shape='rect' coords='945.5,45,950.5,105' title='Phosphorylation
+at position 114' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270' target='_blank'><area shape='rect' coords='961.5,45,966.5,105' title='Acetylation
+at position 116' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275' target='_blank'><area shape='rect' coords='1009.5,45,1014.5,105' title='Phosphorylation
+at position 122' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270' target='_blank'><area shape='rect' coords='1017.5,45,1022.5,105' title='Phosphorylation
+at position 123' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=26051181' target='_blank'><area shape='rect' coords='1057.5,45,1062.5,105' title='Phosphorylation
+at position 128' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270' target='_blank'><area shape='rect' coords='1089.5,45,1094.5,105' title='Phosphorylation
+at position 132' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275' target='_blank'><area shape='rect' coords='1097.5,45,1102.5,105' title='Phosphorylation
+at position 133' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275' target='_blank'><area shape='rect' coords='1105.5,45,1110.5,105' title='Phosphorylation
+at position 134' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=30108239' target='_blank'><area shape='rect' coords='1121.5,45,1126.5,105' title='Phosphorylation
+at position 136' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=26055452' target='_blank'><area shape='rect' coords='1137.5,45,1142.5,105' title='Phosphorylation
+at position 138' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=26055452' target='_blank'><area shape='rect' coords='1169.5,45,1174.5,105' title='Phosphorylation
+at position 142' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275' target='_blank'><area shape='rect' coords='1209.5,45,1214.5,105' title='Phosphorylation
+at position 147' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=25159151' target='_blank'><area shape='rect' coords='1241.5,45,1246.5,105' title='Phosphorylation
+at position 151' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=25159151' target='_blank'><area shape='rect' coords='1249.5,45,1254.5,105' title='Phosphorylation
+at position 152' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275' target='_blank'><area shape='rect' coords='1281.5,45,1286.5,105' title='Phosphorylation
+at position 156' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=30108239' target='_blank'><area shape='rect' coords='1497.5,45,1502.5,105' title='Phosphorylation
+at position 183' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275' target='_blank'><area shape='rect' coords='1529.5,45,1534.5,105' title='Phosphorylation
+at position 187' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275' target='_blank'><area shape='rect' coords='1537.5,45,1542.5,105' title='Phosphorylation
+at position 188' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231' target='_blank'><area shape='rect' coords='1545.5,45,1550.5,105' title='Phosphorylation
+at position 189' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231' target='_blank'><area shape='rect' coords='1585.5,45,1590.5,105' title='Phosphorylation
+at position 194' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231' target='_blank'><area shape='rect' coords='1593.5,45,1598.5,105' title='Phosphorylation
+at position 195' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231' target='_blank'><area shape='rect' coords='1601.5,45,1606.5,105' title='Phosphorylation
+at position 196' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231' target='_blank'><area shape='rect' coords='1721.5,45,1726.5,105' title='Phosphorylation
+at position 211' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231' target='_blank'><area shape='rect' coords='1849.5,45,1854.5,105' title='Phosphorylation
+at position 227' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231' target='_blank'><area shape='rect' coords='2065.5,45,2070.5,105' title='Methylation
+at position 254' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=22692423' target='_blank'><area shape='rect' coords='2225.5,45,2230.5,105' title='Ubiquitination
+at position 274' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231' target='_blank'><area shape='rect' coords='2305.5,45,2310.5,105' title='Phosphorylation
+at position 284' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=-' target='_blank'><area shape='rect' coords='2497.5,45,2502.5,105' title='Phosphorylation
+at position 308' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=-' target='_blank'><area shape='rect' coords='2673.5,45,2678.5,105' title='Phosphorylation
+at position 330' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=27067055' target='_blank'><area shape='rect' coords='2681.5,45,2686.5,105' title='Phosphorylation
+at position 331' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231' target='_blank'><area shape='rect' coords='2689.5,45,2694.5,105' title='Phosphorylation
+at position 332' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270' target='_blank'><area shape='rect' coords='2705.5,45,2710.5,105' title='Phosphorylation
+at position 334' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270' target='_blank'><area shape='rect' coords='2801.5,45,2806.5,105' title='Phosphorylation
+at position 346' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270' target='_blank'><area shape='rect' coords='2809.5,45,2814.5,105' title='Sumoylation
+at position 347' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270' target='_blank'><area shape='rect' coords='3337.5,45,3342.5,105' title='Phosphorylation
+at position 413' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275' target='_blank'><area shape='rect' coords='3417.5,45,3422.5,105' title='Phosphorylation
+at position 423' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=-' target='_blank'><area shape='rect' coords='3449.5,45,3454.5,105' title='Phosphorylation
+at position 427' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=26074081' target='_blank'><area shape='rect' coords='3465.5,45,3470.5,105' title='Phosphorylation
+at position 429' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270' target='_blank'><area shape='rect' coords='3529.5,45,3534.5,105' title='Phosphorylation
+at position 437' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270' target='_blank'><area shape='rect' coords='3561.5,45,3566.5,105' title='Phosphorylation
+at position 441' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270' target='_blank'><area shape='rect' coords='3609.5,45,3614.5,105' title='Phosphorylation
+at position 447' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275' target='_blank'><area shape='rect' coords='3649.5,45,3654.5,105' title='Phosphorylation
+at position 452' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231' target='_blank'><area shape='rect' coords='3657.5,45,3662.5,105' title='Phosphorylation
+at position 453' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419' target='_blank'><area shape='rect' coords='3673.5,45,3678.5,105' title='Phosphorylation
+at position 455' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419' target='_blank'><area shape='rect' coords='3705.5,45,3710.5,105' title='Phosphorylation
+at position 459' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=30108239' target='_blank'><area shape='rect' coords='3729.5,45,3734.5,105' title='Phosphorylation
+at position 462' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=30278072' target='_blank'><area shape='rect' coords='3737.5,45,3742.5,105' title='Phosphorylation
+at position 463' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419' target='_blank'><area shape='rect' coords='3761.5,45,3766.5,105' title='Phosphorylation
+at position 466' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419' target='_blank'><area shape='rect' coords='3769.5,45,3774.5,105' title='Phosphorylation
+at position 467' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419' target='_blank'><area shape='rect' coords='3785.5,45,3790.5,105' title='Phosphorylation
+at position 469' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=25159151' target='_blank'><area shape='rect' coords='3897.5,45,3902.5,105' title='Phosphorylation
+at position 483' href='https://www.ncbi.nlm.nih.gov/pubmed/?term=28355574' target='_blank'><area shape='rect' coords='1960,380,2392,395' title='Basic helix-loop-helix dimerisation region bHLH
+between position 241-294' href='https://www.ebi.ac.uk/interpro/entry/IPR001092' target='_blank'><area shape='rect' coords='1920,380,2352,395' title='Basic helix-loop-helix dimerisation region bHLH
+between position 236-289' href='https://www.ebi.ac.uk/interpro/entry/IPR001092' target='_blank'><area shape='rect' coords='1896,380,2352,395' title='Basic helix-loop-helix dimerisation region bHLH
+between position 233-289' href='https://www.ebi.ac.uk/interpro/entry/IPR001092' target='_blank'><area shape='rect' coords='1888,400,2392,415' title='Helix-loop-helix DNA-binding
+between position 232-294' href='https://www.ebi.ac.uk/interpro/entry/IPR011598' target='_blank'><area shape='rect' coords='1832,400,2488,415' title='Helix-loop-helix DNA-binding
+between position 225-306' href='https://www.ebi.ac.uk/interpro/entry/IPR011598' target='_blank'></map></div>															</td>
+														</tr>
+													</tbody>
+                    	                		</table>
+						    				</div>
+                    	        		</div>
+				    				</div>
+                    			</div>
+								<!-- FUNCTION & STRUCTURE END-->
+
+                    			<!-- EXP SITES START-->
+                    			<div class="tab-pane fade" id="exp">
+                        			<div class="panel panel-default">
+                            			<div class="panel-heading">Experimental Post-Translational Modification Sites</div>
+                            			<div class="panel-body">
+                                			<div class="table-responsive">
+												<p>* ASA = Accessible Surface Area</p>
+                                    			<table class="table table-hover" style="table-layout:fixed; word-wrap:break-word;">
+			    									<tr align="center">
+														<th width ='16%' >Locations</th>
+														<th width ='20%'>Modification</th>
+														<th width ='20%'>Substrate Peptides<br>&<br>Secondary Structure</th>
+														<th width ='14%' >ASA (%)</th>
+														<th width ='15%'>Reference</th>
+														<!--<th width ='10%'>Structural Characterization</th>-->
+														<th width ='15%'>Orthologous<br>Protein Cluster</th>
+			    									</tr>
+			    									<tbody>
+														<tr align='center'><td>3</td><td>Phosphorylation</td><td style="font-family:Courier New;">-----MA<font color=blue><b>S</b></font>RIGLRMQ<br>-----CC<font color=blue><b>H</b></font>HHHHHHH</td><td>24.11</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=-" target="_blank">-</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=3&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>8</td><td>Dimethylation</td><td style="font-family:Courier New;">MASRIGL<font color=blue><b>R</b></font>MQLMREQ<br>CCHHHHH<font color=blue><b>H</b></font>HHHHHHH</td><td>12.94</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=-" target="_blank">-</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=8&PTM_type=','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>8</td><td>Methylation</td><td style="font-family:Courier New;">MASRIGL<font color=blue><b>R</b></font>MQLMREQ<br>CCHHHHH<font color=blue><b>H</b></font>HHHHHHH</td><td>12.94</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=54559935" target="_blank">54559935</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=8&PTM_type=Methylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>33</td><td>Phosphorylation</td><td style="font-family:Courier New;">QQQAVMH<font color=blue><b>Y</b></font>MQQQQQQ<br>HHHHHHH<font color=blue><b>H</b></font>HHHHHHH</td><td>4.40</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231" target="_blank">20068231</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=33&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>50</td><td>Phosphorylation</td><td style="font-family:Courier New;">QQLGGPP<font color=blue><b>T</b></font>PAINTPV<br>HHHCCCC<font color=blue><b>C</b></font>CCCCCCC</td><td>28.61</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28348404" target="_blank">28348404</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=50&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>55</td><td>Phosphorylation</td><td style="font-family:Courier New;">PPTPAIN<font color=blue><b>T</b></font>PVHFQSP<br>CCCCCCC<font color=blue><b>C</b></font>CCCCCCC</td><td>22.15</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28348404" target="_blank">28348404</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=55&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>61 (in isoform 2)</td><td>Phosphorylation</td><td>-</td><td>38.13</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=-" target="_blank">-</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=61&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>61</td><td>Phosphorylation</td><td style="font-family:Courier New;">NTPVHFQ<font color=blue><b>S</b></font>PPPVPGE<br>CCCCCCC<font color=blue><b>C</b></font>CCCCCCC</td><td>38.13</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231" target="_blank">20068231</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=61&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>74</td><td>Phosphorylation</td><td style="font-family:Courier New;">GEVLKVQ<font color=blue><b>S</b></font>YLENPTS<br>CCEEEEE<font color=blue><b>E</b></font>HHHCCCC</td><td>34.37</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=25056879" target="_blank">25056879</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=74&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>91</td><td>Ubiquitination</td><td style="font-family:Courier New;">LQQSQHQ<font color=blue><b>K</b></font>VREYLSE<br>CCHHHHH<font color=blue><b>H</b></font>HHHHHHH</td><td>40.93</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=-" target="_blank">-</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=91&PTM_type=Ubiquitination','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>95</td><td>Phosphorylation</td><td style="font-family:Courier New;">QHQKVRE<font color=blue><b>Y</b></font>LSETYGN<br>HHHHHHH<font color=blue><b>H</b></font>HHHHHCC</td><td>12.64</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=-" target="_blank">-</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=95&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>97</td><td>Phosphorylation</td><td style="font-family:Courier New;">QKVREYL<font color=blue><b>S</b></font>ETYGNKF<br>HHHHHHH<font color=blue><b>H</b></font>HHHCCCC</td><td>27.30</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419" target="_blank">28450419</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=97&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>99</td><td>Phosphorylation</td><td style="font-family:Courier New;">VREYLSE<font color=blue><b>T</b></font>YGNKFAA<br>HHHHHHH<font color=blue><b>H</b></font>HCCCCEE</td><td>33.09</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419" target="_blank">28450419</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=99&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>100</td><td>Phosphorylation</td><td style="font-family:Courier New;">REYLSET<font color=blue><b>Y</b></font>GNKFAAH<br>HHHHHHH<font color=blue><b>H</b></font>CCCCEEE</td><td>18.04</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=-" target="_blank">-</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=100&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>109</td><td>Phosphorylation</td><td style="font-family:Courier New;">NKFAAHI<font color=blue><b>S</b></font>PAQGSPK<br>CCCEEEC<font color=blue><b>C</b></font>CCCCCCC</td><td>12.33</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270" target="_blank">22167270</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=109&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>111</td><td>Phosphorylation</td><td style="font-family:Courier New;">FAAHISP<font color=blue><b>A</b></font>QGSPKPP<br>CEEECCC<font color=blue><b>C</b></font>CCCCCCC</td><td>21.41</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275" target="_blank">27251275</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=111&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>114</td><td>Phosphorylation</td><td style="font-family:Courier New;">HISPAQG<font color=blue><b>S</b></font>PKPPPAA<br>ECCCCCC<font color=blue><b>C</b></font>CCCCCCC</td><td>20.05</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270" target="_blank">22167270</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=114&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>116</td><td>Acetylation</td><td style="font-family:Courier New;">SPAQGSP<font color=blue><b>K</b></font>PPPAASP<br>CCCCCCC<font color=blue><b>C</b></font>CCCCCCC</td><td>72.37</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26051181" target="_blank">26051181</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=116&PTM_type=Acetylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>122</td><td>Phosphorylation</td><td style="font-family:Courier New;">PKPPPAA<font color=blue><b>S</b></font>PGVRAGH<br>CCCCCCC<font color=blue><b>C</b></font>CCCCCCC</td><td>25.05</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270" target="_blank">22167270</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=122&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>123</td><td>Phosphorylation</td><td style="font-family:Courier New;">KPPPAAS<font color=blue><b>P</b></font>GVRAGHV<br>CCCCCCC<font color=blue><b>C</b></font>CCCCCCE</td><td>40.34</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275" target="_blank">27251275</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=123&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>128</td><td>Phosphorylation</td><td style="font-family:Courier New;">ASPGVRA<font color=blue><b>G</b></font>HVLSSSA<br>CCCCCCC<font color=blue><b>C</b></font>CEEECCC</td><td>10.81</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275" target="_blank">27251275</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=128&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>132</td><td>Phosphorylation</td><td style="font-family:Courier New;">VRAGHVL<font color=blue><b>S</b></font>SSAGNSA<br>CCCCCEE<font color=blue><b>E</b></font>CCCCCCC</td><td>22.58</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=30108239" target="_blank">30108239</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=132&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>133</td><td>Phosphorylation</td><td style="font-family:Courier New;">RAGHVLS<font color=blue><b>S</b></font>SAGNSAP<br>CCCCEEE<font color=blue><b>C</b></font>CCCCCCC</td><td>21.75</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26055452" target="_blank">26055452</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=133&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>134</td><td>Phosphorylation</td><td style="font-family:Courier New;">AGHVLSS<font color=blue><b>S</b></font>AGNSAPN<br>CCCEEEC<font color=blue><b>C</b></font>CCCCCCC</td><td>36.50</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26055452" target="_blank">26055452</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=134&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>136</td><td>Phosphorylation</td><td style="font-family:Courier New;">HVLSSSA<font color=blue><b>G</b></font>NSAPNSP<br>CEEECCC<font color=blue><b>C</b></font>CCCCCCC</td><td>30.49</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275" target="_blank">27251275</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=136&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>138</td><td>Phosphorylation</td><td style="font-family:Courier New;">LSSSAGN<font color=blue><b>S</b></font>APNSPMA<br>EECCCCC<font color=blue><b>C</b></font>CCCCCCE</td><td>44.15</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=25159151" target="_blank">25159151</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=138&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>142</td><td>Phosphorylation</td><td style="font-family:Courier New;">AGNSAPN<font color=blue><b>S</b></font>PMAMLHI<br>CCCCCCC<font color=blue><b>C</b></font>CCEEEEC</td><td>18.26</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=25159151" target="_blank">25159151</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=142&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>147</td><td>Phosphorylation</td><td style="font-family:Courier New;">PNSPMAM<font color=blue><b>L</b></font>HIGSNPE<br>CCCCCEE<font color=blue><b>E</b></font>ECCCCCC</td><td>1.61</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275" target="_blank">27251275</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=147&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>151</td><td>Phosphorylation</td><td style="font-family:Courier New;">MAMLHIG<font color=blue><b>S</b></font>NPERELD<br>CEEEECC<font color=blue><b>C</b></font>CCCHHHH</td><td>48.92</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=30108239" target="_blank">30108239</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=151&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>152</td><td>Phosphorylation</td><td style="font-family:Courier New;">AMLHIGS<font color=blue><b>N</b></font>PERELDD<br>EEEECCC<font color=blue><b>C</b></font>CCHHHHH</td><td>36.92</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275" target="_blank">27251275</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=152&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>156</td><td>Phosphorylation</td><td style="font-family:Courier New;">IGSNPER<font color=blue><b>E</b></font>LDDVIDN<br>CCCCCCH<font color=blue><b>H</b></font>HHHHHHH</td><td>55.69</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275" target="_blank">27251275</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=156&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>183</td><td>Phosphorylation</td><td style="font-family:Courier New;">PEMQMPN<font color=blue><b>T</b></font>LPLSSSH<br>HHHCCCC<font color=blue><b>C</b></font>CCCCCCC</td><td>24.71</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231" target="_blank">20068231</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=183&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>187</td><td>Phosphorylation</td><td style="font-family:Courier New;">MPNTLPL<font color=blue><b>S</b></font>SSHLNVY<br>CCCCCCC<font color=blue><b>C</b></font>CCCCEEE</td><td>28.05</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231" target="_blank">20068231</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=187&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>188</td><td>Phosphorylation</td><td style="font-family:Courier New;">PNTLPLS<font color=blue><b>S</b></font>SHLNVYS<br>CCCCCCC<font color=blue><b>C</b></font>CCCEEEC</td><td>29.47</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231" target="_blank">20068231</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=188&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>189</td><td>Phosphorylation</td><td style="font-family:Courier New;">NTLPLSS<font color=blue><b>S</b></font>HLNVYSS<br>CCCCCCC<font color=blue><b>C</b></font>CCEEECC</td><td>28.72</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231" target="_blank">20068231</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=189&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>194</td><td>Phosphorylation</td><td style="font-family:Courier New;">SSSHLNV<font color=blue><b>Y</b></font>SSDPQVT<br>CCCCCEE<font color=blue><b>E</b></font>CCCCCEE</td><td>11.03</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231" target="_blank">20068231</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=194&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>195</td><td>Phosphorylation</td><td style="font-family:Courier New;">SSHLNVY<font color=blue><b>S</b></font>SDPQVTA<br>CCCCEEE<font color=blue><b>C</b></font>CCCCEEH</td><td>24.79</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231" target="_blank">20068231</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=195&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>196</td><td>Phosphorylation</td><td style="font-family:Courier New;">SHLNVYS<font color=blue><b>S</b></font>DPQVTAS<br>CCCEEEC<font color=blue><b>C</b></font>CCCEEHH</td><td>35.31</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231" target="_blank">20068231</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=196&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>211</td><td>Phosphorylation</td><td style="font-family:Courier New;">LVGVTSS<font color=blue><b>S</b></font>CPADLTQ<br>HEEECCC<font color=blue><b>C</b></font>CCCCCCH</td><td>24.72</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=22692423" target="_blank">22692423</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=211&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>227</td><td>Phosphorylation</td><td style="font-family:Courier New;">RELTDAE<font color=blue><b>S</b></font>RALAKER<br>HHCCHHH<font color=blue><b>H</b></font>HHHHHHH</td><td>25.28</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231" target="_blank">20068231</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=227&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>254</td><td>Methylation</td><td style="font-family:Courier New;">RRFNIND<font color=blue><b>R</b></font>IKELGML<br>HHCCHHH<font color=blue><b>H</b></font>HHHHCCC</td><td>37.07</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=-" target="_blank">-</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=254&PTM_type=Methylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>274</td><td>Ubiquitination</td><td style="font-family:Courier New;">DLDVRWN<font color=blue><b>K</b></font>GTILKAS<br>CCCCCCC<font color=blue><b>C</b></font>CHHHHHH</td><td>50.93</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=-" target="_blank">-</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=274&PTM_type=Ubiquitination','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>284</td><td>Phosphorylation</td><td style="font-family:Courier New;">ILKASVD<font color=blue><b>Y</b></font>IRRMQKD<br>HHHHHHH<font color=blue><b>H</b></font>HHHHHHH</td><td>8.31</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=27067055" target="_blank">27067055</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=284&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>308</td><td>Phosphorylation</td><td style="font-family:Courier New;">HSRRLEM<font color=blue><b>T</b></font>NKQLWLR<br>HHHHHHH<font color=blue><b>H</b></font>HHHHHHH</td><td>29.86</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231" target="_blank">20068231</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=308&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>330</td><td>Phosphorylation</td><td style="font-family:Courier New;">ARVHGLP<font color=blue><b>T</b></font>TSPSGMN<br>HHHHCCC<font color=blue><b>C</b></font>CCCCCCC</td><td>44.97</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270" target="_blank">22167270</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=330&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>331</td><td>Phosphorylation</td><td style="font-family:Courier New;">RVHGLPT<font color=blue><b>T</b></font>SPSGMNM<br>HHHCCCC<font color=blue><b>C</b></font>CCCCCCH</td><td>36.38</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270" target="_blank">22167270</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=331&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>332</td><td>Phosphorylation</td><td style="font-family:Courier New;">VHGLPTT<font color=blue><b>S</b></font>PSGMNMA<br>HHCCCCC<font color=blue><b>C</b></font>CCCCCHH</td><td>21.39</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270" target="_blank">22167270</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=332&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>334</td><td>Phosphorylation</td><td style="font-family:Courier New;">GLPTTSP<font color=blue><b>S</b></font>GMNMAEL<br>CCCCCCC<font color=blue><b>C</b></font>CCCHHHH</td><td>50.90</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270" target="_blank">22167270</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=334&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>346</td><td>Phosphorylation</td><td style="font-family:Courier New;">AELAQQV<font color=blue><b>V</b></font>KQELPSE<br>HHHHHHH<font color=blue><b>H</b></font>HCCCCCC</td><td>4.62</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275" target="_blank">27251275</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=346&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>347</td><td>Sumoylation</td><td style="font-family:Courier New;">ELAQQVV<font color=blue><b>K</b></font>QELPSEE<br>HHHHHHH<font color=blue><b>H</b></font>CCCCCCC</td><td>38.92</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=-" target="_blank">-</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=347&PTM_type=Sumoylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>413</td><td>Phosphorylation</td><td style="font-family:Courier New;">EDEGPPG<font color=blue><b>Y</b></font>PEPLAPG<br>CCCCCCC<font color=blue><b>C</b></font>CCCCCCC</td><td>15.36</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26074081" target="_blank">26074081</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=413&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>423</td><td>Phosphorylation</td><td style="font-family:Courier New;">PLAPGHG<font color=blue><b>S</b></font>PFPSLSK<br>CCCCCCC<font color=blue><b>C</b></font>CCCCCCH</td><td>20.07</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270" target="_blank">22167270</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=423&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>427</td><td>Phosphorylation</td><td style="font-family:Courier New;">GHGSPFP<font color=blue><b>S</b></font>LSKKDLD<br>CCCCCCC<font color=blue><b>C</b></font>CCHHHHC</td><td>45.73</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270" target="_blank">22167270</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=427&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>429</td><td>Phosphorylation</td><td style="font-family:Courier New;">GSPFPSL<font color=blue><b>S</b></font>KKDLDLM<br>CCCCCCC<font color=blue><b>C</b></font>HHHHCEE</td><td>41.83</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=22167270" target="_blank">22167270</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=429&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>437</td><td>Phosphorylation</td><td style="font-family:Courier New;">KKDLDLM<font color=blue><b>L</b></font>LDDSLLP<br>HHHHCEE<font color=blue><b>E</b></font>ECCCCHH</td><td>6.53</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275" target="_blank">27251275</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=437&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>441</td><td>Phosphorylation</td><td style="font-family:Courier New;">DLMLLDD<font color=blue><b>S</b></font>LLPLASD<br>CEEEECC<font color=blue><b>C</b></font>CHHHHCC</td><td>31.32</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=20068231" target="_blank">20068231</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=441&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>447</td><td>Phosphorylation</td><td style="font-family:Courier New;">DSLLPLA<font color=blue><b>S</b></font>DPLLSTM<br>CCCHHHH<font color=blue><b>C</b></font>CCCHHHC</td><td>47.66</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419" target="_blank">28450419</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=447&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>452</td><td>Phosphorylation</td><td style="font-family:Courier New;">LASDPLL<font color=blue><b>S</b></font>TMSPEAS<br>HHCCCCH<font color=blue><b>H</b></font>HCCHHHH</td><td>29.73</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419" target="_blank">28450419</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=452&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>453</td><td>Phosphorylation</td><td style="font-family:Courier New;">ASDPLLS<font color=blue><b>T</b></font>MSPEASK<br>HCCCCHH<font color=blue><b>H</b></font>CCHHHHH</td><td>22.95</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=30108239" target="_blank">30108239</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=453&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>455</td><td>Phosphorylation</td><td style="font-family:Courier New;">DPLLSTM<font color=blue><b>S</b></font>PEASKAS<br>CCCHHHC<font color=blue><b>C</b></font>HHHHHHH</td><td>21.48</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=30278072" target="_blank">30278072</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=455&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>459</td><td>Phosphorylation</td><td style="font-family:Courier New;">STMSPEA<font color=blue><b>S</b></font>KASSRRS<br>HHCCHHH<font color=blue><b>H</b></font>HHHHCCC</td><td>27.39</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419" target="_blank">28450419</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=459&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>462</td><td>Phosphorylation</td><td style="font-family:Courier New;">SPEASKA<font color=blue><b>S</b></font>SRRSSFS<br>CHHHHHH<font color=blue><b>H</b></font>HCCCCCC</td><td>28.28</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419" target="_blank">28450419</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=462&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>463</td><td>Phosphorylation</td><td style="font-family:Courier New;">PEASKAS<font color=blue><b>S</b></font>RRSSFSM<br>HHHHHHH<font color=blue><b>H</b></font>CCCCCCC</td><td>36.25</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28450419" target="_blank">28450419</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=463&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>466</td><td>Phosphorylation</td><td style="font-family:Courier New;">SKASSRR<font color=blue><b>S</b></font>SFSMEEG<br>HHHHHCC<font color=blue><b>C</b></font>CCCCCCC</td><td>34.33</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=25159151" target="_blank">25159151</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=466&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>467</td><td>Phosphorylation</td><td style="font-family:Courier New;">KASSRRS<font color=blue><b>S</b></font>FSMEEGD<br>HHHHCCC<font color=blue><b>C</b></font>CCCCCCC</td><td>21.38</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28355574" target="_blank">28355574</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=467&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>469</td><td>Phosphorylation</td><td style="font-family:Courier New;">SSRRSSF<font color=blue><b>S</b></font>MEEGDVL<br>HHCCCCC<font color=blue><b>C</b></font>CCCCCCC</td><td>27.51</td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=23927012" target="_blank">23927012</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=469&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td>483</td><td>Phosphorylation</td><td style="font-family:Courier New;">L------<font color=blue><b>-</b></font>-------<br>C------<font color=blue><b>-</b></font>-------</td><td></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=27251275" target="_blank">27251275</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_orthologous.php?ID=TFEB_HUMAN&pos=483&PTM_type=Phosphorylation','','left=100,top=150,height=400,width=800,scrollbars');></td></tr>                                					</tbody>
+                                				</table>
+												<hr>
+                            				</div>
+                        				</div>
+                    				</div>
+                				</div>
+								<!-- EXP SITES END-->
+
+								<!-- UPSTREAM PROTEINS START-->
+								<div class="tab-pane fade" id="upstream">
+									<div class="panel panel-default">
+										<div class="panel-heading">Upstream regulatory proteins (kinases for phosphorylation sites, E3 ubiquitin ligases of ubiquitination sites, ...)</div>
+										<div class="panel-body">
+											<div class="table-responsive">
+												<table class="table table-hover" style="table-layout:fixed; word-wrap:break-word;">
+													<tr align="center">
+														<th width ='10%' >Modified Location</th>
+														<th width ='12%'>Modified Residue</th>
+														<th width ='13%'>Modification</th>
+														<th width ='15%'>Type of Upstream Proteins</th>
+														<th width ='15%' >Gene Name of Upstream Proteins</th>
+														<th width ='15%'>UniProt AC of Upstream Proteins</th>
+														<th width ='10%'>Sources</th>
+													</tr>
+													<tbody>
+														<tr align='center'><td>3</td><td>S</td><td>Phosphorylation</td><td>Kinase</td><td>MAP4K3</td><td><a href="https://www.uniprot.org/uniprot/Q8IVH8" target="_blank">Q8IVH8</a><br /></td><td>GPS</td></tr><tr align='center'><td>122</td><td>S</td><td>Phosphorylation</td><td>Kinase</td><td>MTOR</td><td><a href="https://www.uniprot.org/uniprot/P42345" target="_blank">P42345</a><br /></td><td>PSP</td></tr><tr align='center'><td>142</td><td>S</td><td>Phosphorylation</td><td>Kinase</td><td>MTOR</td><td><a href="https://www.uniprot.org/uniprot/P42345" target="_blank">P42345</a><br /></td><td>Uniprot</td></tr><tr align='center'><td>211</td><td>S</td><td>Phosphorylation</td><td>Kinase</td><td>MTOR</td><td><a href="https://www.uniprot.org/uniprot/P42345" target="_blank">P42345</a><br /></td><td>Uniprot</td></tr><tr align='center'><td>467</td><td>S</td><td>Phosphorylation</td><td>Kinase</td><td>AKT1</td><td><a href="https://www.uniprot.org/uniprot/P31749" target="_blank">P31749</a><br /></td><td>PSP</td></tr>													</tbody>
+												</table>
+												<hr>
+											</div>
+										</div>
+									</div>
+								</div>
+								<!-- UPSTREAM PROTEINS END-->
+
+								<!-- DESCRIPTION OF SITE START-->
+								<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
+								<script>
+									function toogle(event) {
+										//展开表格
+										var target = event.target;
+										var status = $(target).data('status'), id = $(target).data('id')
+										console.log(event, status, id)
+										if(status == "off") {
+											$(target).text("close").data('status', 'on');
+											$("#" + id).css("display", "table-row");
+										} else {
+											$(target).text("show").data('status', 'off');
+											$("#" + id).css("display", "none");
+										}
+									};
+								</script>
+
+								<div class="tab-pane fade" id="description">
+									<div class="panel panel-default">
+										<div class="panel-heading">Functions of PTM Sites</div>
+										<div class="panel-body">
+											<div class="table-responsive">
+												<table class="table table-hover" style="table-layout:fixed; word-wrap:break-word;">
+													<tr align="center">
+														<th width ='20%' >Modified Location</th>
+														<th width ='20%'>Modified Residue</th>
+														<th width ='20%'>Modification</th>
+                    		 	   						<th width ='20%'>Function</th>
+														<th width ='20%'>Reference</th>
+													</tr>
+													<tbody>
+														<tr><td align='center' colspan='7'><br><font color='red'>Oops, there are no descriptions of PTM sites of TFEB_HUMAN !!</font></td></tr>													</tbody>
+												</table>
+												<hr>
+											</div>
+										</div>
+									</div>
+								</div>
+								<!-- DESCRIPTION OF SITE END-->
+
+    							<!-- SNP-PTM START-->
+        						<div class="tab-pane fade" id="snpptm">
+            						<div class="panel panel-default">
+                						<div class="panel-heading">Disease-associated PTM Sites based on SAP</div>
+                						<div class="panel-body">
+                    						<div class="table-responsive">
+												<p>* Distance = the distance between SAP position and PTM sites.</p>
+                        						<table class="table table-hover" style="table-layout:fixed; word-wrap:break-word;">
+                        							<tr align="center">
+                            							<th width ='8%'>Modified Location</th>
+                            							<th width ='12%'>Modification</th>
+                            							<th width ='10%'>Variant Position<br>(Distance <= 10) </th>
+                            							<th width ='10%'>Residue Change</th>
+                            							<th width ='10%'>SAP</th>
+                            							<th width ='20%'>Related Disease</th>
+                            							<th width ='10%'>Reference</th>
+                        							</tr>
+                        							<tbody>
+														<tr><td align='center' colspan='7'><br><font color='red'>Oops, there are no SNP-PTM records of TFEB_HUMAN !!</font></td></tr>                    								</tbody>
+    	                						</table>
+												<hr>
+    	            						</div>
+    	        						</div>
+    	    						</div>
+    							</div>
+								<!-- SNP-PTM END-->
+
+								<!-- PROTEIN INTERACTION START-->
+        						<div class="tab-pane fade" id="ppi">
+            						<div class="panel panel-default">
+                						<div class="panel-heading">Protein-Protein Interaction</div>
+										<div class="panel-body">
+			    							<div class="table-responsive">
+			        							<table class="table table-hover" style="table-layout:fixed; word-wrap:break-word;">
+                									<tr align="center">
+				        								<th>Interacting Protein</th>
+                                						<th>Gene Name</th>
+                		        						<th>Interaction Type</th>
+                		        						<th>PPI Reference</th>
+                		        						<th>Domain-Domain Interactions</th>
+		                							</tr>
+				    								<tbody>
+														<tr align='center'><td><a href='info.php?id=ATP5J_HUMAN' target='_blank'>ATP5J_HUMAN</td><td>ATP5J</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26496610" target="_blank">26496610</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=ATP5J_HUMAN&scale=8&width=3868&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=IFIT1_HUMAN' target='_blank'>IFIT1_HUMAN</td><td>IFIT1</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26496610" target="_blank">26496610</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=IFIT1_HUMAN&scale=8&width=3884&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=STT3A_HUMAN' target='_blank'>STT3A_HUMAN</td><td>STT3A</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26496610" target="_blank">26496610</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=STT3A_HUMAN&scale=8&width=5700&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=TAU_HUMAN' target='_blank'>TAU_HUMAN</td><td>MAPT</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26496610" target="_blank">26496610</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=TAU_HUMAN&scale=8&width=6124&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=MITF_HUMAN' target='_blank'>MITF_HUMAN</td><td>MITF</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26496610" target="_blank">26496610</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=MITF_HUMAN&scale=8&width=4268&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=PPM1G_HUMAN' target='_blank'>PPM1G_HUMAN</td><td>PPM1G</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26496610" target="_blank">26496610</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=PPM1G_HUMAN&scale=8&width=4428&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=TFE3_HUMAN' target='_blank'>TFE3_HUMAN</td><td>TFE3</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26496610" target="_blank">26496610</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=TFE3_HUMAN&scale=8&width=4660&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=BAG2_HUMAN' target='_blank'>BAG2_HUMAN</td><td>BAG2</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26496610" target="_blank">26496610</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=BAG2_HUMAN&scale=8&width=3868&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=LCOR_HUMAN' target='_blank'>LCOR_HUMAN</td><td>C10orf12</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26496610" target="_blank">26496610</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=LCOR_HUMAN&scale=8&width=3868&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=FABD_HUMAN' target='_blank'>FABD_HUMAN</td><td>MCAT</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26496610" target="_blank">26496610</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=FABD_HUMAN&scale=8&width=3868&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=EMAL4_HUMAN' target='_blank'>EMAL4_HUMAN</td><td>EML4</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26496610" target="_blank">26496610</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=EMAL4_HUMAN&scale=8&width=7908&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=TBC14_HUMAN' target='_blank'>TBC14_HUMAN</td><td>TBC1D14</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26496610" target="_blank">26496610</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=TBC14_HUMAN&scale=8&width=5604&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=HDAC5_HUMAN' target='_blank'>HDAC5_HUMAN</td><td>HDAC5</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=26137861" target="_blank">26137861</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=HDAC5_HUMAN&scale=8&width=9036&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=TFE3_HUMAN' target='_blank'>TFE3_HUMAN</td><td>TFE3</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28514442" target="_blank">28514442</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=TFE3_HUMAN&scale=8&width=4660&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=TFEC_HUMAN' target='_blank'>TFEC_HUMAN</td><td>TFEC</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28514442" target="_blank">28514442</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=TFEC_HUMAN&scale=8&width=3868&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=TAF9_HUMAN' target='_blank'>TAF9_HUMAN</td><td>TAF9</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28514442" target="_blank">28514442</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=TAF9_HUMAN&scale=8&width=3868&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=1433G_HUMAN' target='_blank'>1433G_HUMAN</td><td>YWHAG</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28514442" target="_blank">28514442</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=1433G_HUMAN&scale=8&width=3868&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=1433Z_HUMAN' target='_blank'>1433Z_HUMAN</td><td>YWHAZ</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28514442" target="_blank">28514442</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=1433Z_HUMAN&scale=8&width=3868&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=1433E_HUMAN' target='_blank'>1433E_HUMAN</td><td>YWHAE</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28514442" target="_blank">28514442</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=1433E_HUMAN&scale=8&width=3868&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=1433B_HUMAN' target='_blank'>1433B_HUMAN</td><td>YWHAB</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28514442" target="_blank">28514442</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=1433B_HUMAN&scale=8&width=3868&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=GPNMB_HUMAN' target='_blank'>GPNMB_HUMAN</td><td>GPNMB</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=28514442" target="_blank">28514442</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=GPNMB_HUMAN&scale=8&width=4636&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr><tr align='center'><td><a href='info.php?id=TRI16_HUMAN' target='_blank'>TRI16_HUMAN</td><td>TRIM16</td><td>physical<br /></td><td><a href="https://www.ncbi.nlm.nih.gov/pubmed/?term=27693506" target="_blank">27693506</a><br /></td><td><input type=button value='Show' class='btn btn-info' onclick=window.open('info_show_ppi.php?ID_A=TFEB_HUMAN&ID_B=TRI16_HUMAN&scale=8&width=4572&height=900','','left=100,top=150,height=400,width=800,scrollbars');></td></tr>													</tbody>
+												</table>
+				    							<hr>
+											</div>
+										</div>
+    	    						</div>
+    							</div>
+								<!-- PROTEIN INTERACTION END-->
+
+    							<!-- DRUG & DISEASE START-->
+    							<div class="tab-pane fade" id="drugdisease">
+        							<div class="panel panel-default">
+            							<div class="panel-heading">Drug and Disease Associations</div>
+										<div class="panel-body">
+											<table class='table table-hover'><tr><th colspan='2'>Kegg Disease</th></tr><tr align='center'><td colspan='2'>There are no disease associations of PTM sites.</td></tr><tr><th colspan='2'>OMIM Disease</th></tr><tr align='center'><td colspan='2'>There are no disease associations of PTM sites.</td></tr><tr><th colspan='2'>Kegg Drug</th></tr><tr align='center'><td colspan='2'>There are no disease associations of PTM sites.</td></tr><tr><th colspan='2'>DrugBank</th></tr><tr align='center'><td colspan='7'>There are no disease associations of PTM sites.</td></tr></table>				       					</div>
+                                    </div>
+								</div>
+								<!-- DRUG & DISEASE END-->
+
+								<!--regrulatory network srart-->
+								<div class="tab-pane fade" id="network">
+									<div class="panel panel-default">
+									<div class="panel-heading">Regulatory Network of TFEB_HUMAN</div>
+									<div class="panel-body">
+										<p id="networkLoading">loading...</p>
+										<iframe id="networkFrame" width='100%' height="620px"></iframe>
+									</div>
+									</div>
+								</div>
+								<!--regrulatory network end-->
+
+                                <!-- LIERATURES START-->
+                                <div class="tab-pane fade" id="literature">
+                                    <div class="panel panel-default">
+                                        <div class="panel-heading">Related Literatures of Post-Translational Modification</div>
+										<div class="panel-body">
+											<table class='table table-hover'><tr><td colspan='2' height='18' bgcolor=#999999 align='center'><font color='#FFFFFF' face='Arial, Helvetica, sans-serif' size='3'><b>Phosphorylation</font></td></tr><tr bgcolor=#c1d0df><td align='center'><font color='#666666'><b><font size='2'>Reference</font></b></font></div></td><td align='center'><font color='#666666'><b><font size='2'>PubMed</font></b></font></div></td></tr><tr><td bgcolor='F1F1F1' class='style11'><font color='.#000000.'><b>"Quantitative phosphoproteomic analysis of T cell receptor signalingreveals system-wide modulation of protein-protein interactions.";</b><br>Mayya V., Lundgren D.H., Hwang S.-I., Rezaul K., Wu L., Eng J.K.,Rodionov V., Han D.K.;<br>Sci. Signal. 2:RA46-RA46(2009).<br><u>Cited for</u>: PHOSPHORYLATION [LARGE SCALE ANALYSIS] AT SER-109; SER-114; SER-122AND SER-467, AND MASS SPECTROMETRY.<br></font></td><td bgcolor='F1F1F1' width='100' class='style11'><div align='center'><font color='.#000000.'><a href='http://www.ncbi.nlm.nih.gov/sites/entrez?cmd=Retrieve&db=PubMed&dopt=AbstractPlus&list_uids=19690332' target='_blank'>19690332</a><br>[<a href='http://www.uniprot.org/citations/19690332' target='_blank'>Abstract</a>]</font></div></td></tr><tr><td bgcolor='F1F1F1' class='style11'><font color='.#666666.'><b>"A quantitative atlas of mitotic phosphorylation.";</b><br>Dephoure N., Zhou C., Villen J., Beausoleil S.A., Bakalarski C.E.,Elledge S.J., Gygi S.P.;<br>Proc. Natl. Acad. Sci. U.S.A. 105:10762-10767(2008).<br><u>Cited for</u>: PHOSPHORYLATION [LARGE SCALE ANALYSIS] AT SER-109; SER-114; SER-122;SER-133; SER-134; SER-138 AND SER-142, AND MASS SPECTROMETRY.<br></font></td><td bgcolor='F1F1F1' width='100' class='style11'><div align='center'><font color='.#666666.'><a href='http://www.ncbi.nlm.nih.gov/sites/entrez?cmd=Retrieve&db=PubMed&dopt=AbstractPlus&list_uids=18669648' target='_blank'>18669648</a><br>[<a href='http://www.uniprot.org/citations/18669648' target='_blank'>Abstract</a>]</font></div></td></tr></table>										</div>
+                                    </div>
+                                </div>
+								<!-- LIERATURES END-->
+                            </div>
+							<!-- tab-content END-->
+						</div>
+						<!--panel-body END-->
+                    </div>
+					<!-- panel panel-primary END-->
+				</div>
+				<!-- col-md-12 col-sm-12 END-->
+            </div>
+			<!--ROW:PTM INFO END-->
+        </div>
+		<!--container END-->
+    </div>
+	<!--content-wrapper END-->
+
+
+<!-- FOOTER SECTION START-->
+<div id="gotop" align="center">
+    <i class="fa fa-chevron-circle-up fa-1x"><br/>TOP</i>
+</div>
+<!-- 回到頂端 -->
+<section class="footer-section">
+    <div class="container">
+        <div class="row">
+            <div class="col-md-12">
+                &copy; 2024 Institute of Bioinformatics and Systems Biology, NYCU |<a href="https://sites.google.com/view/biomics/biomics-lab" target="_blank"  > Designed by : BiOmics Laboratory</a>
+            </div>
+        </div>
+    </div>
+</section>
+<!-- JAVASCRIPT FILES PLACED AT THE BOTTOM TO REDUCE THE LOADING TIME -->
+<!-- CORE JQUERY -->
+<script src="assets/js/jquery-1.10.2.js"></script>
+<!-- BOOTSTRAP SCRIPTS -->
+<script src="assets/js/bootstrap.js"></script>
+<!-- CUSTOM SCRIPTS -->
+<script src="assets/js/custom.js"></script>
+<!-- DATATABLE SCRIPTS -->
+<script src="assets/js/dataTables/jquery.dataTables.js"></script>
+<script src="assets/js/dataTables/dataTables.bootstrap.js"></script>
+<!-- CORE jQuery 3.1 -->
+<script src="https://code.jquery.com/jquery-3.1.1.min.js"></script>
+<!-- BACK TO TOP SCRIPTS -->
+<script type="text/javascript">
+    $(function(){
+        $("#gotop").click(function(){
+            jQuery("html,body").animate({
+                scrollTop:0
+            }, 1000);
+        });
+        $(window).scroll(function() {
+            if ($(this).scrollTop() > 300){
+                $('#gotop').fadeIn("fast");
+            } else {
+                $('#gotop').stop().fadeOut("fast");
+            }
+        });
+    });
+</script>
+<!-- FOOTER SECTION END-->
+
+</body>
+</html>
