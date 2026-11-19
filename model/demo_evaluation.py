@@ -3,6 +3,8 @@
 For every residue model of the family (e.g. the S, T and Y runs) and every clustering identity
 version (30/50/70 %), each demo protein is scored by the fold model that never trained on it or on
 its cluster, and the result is reported per candidate residue, per protein and per canonical site.
+The canonical sites are the sites labelled functional in --canonical, hand labels of each protein's
+UniProt phosphosite mutants (see demo_mutagenesis.py).
 
     cd model
     python demo_evaluation.py --run 'finetuning_drop_{res}_2_650M_dbptm_{variant}'
@@ -57,6 +59,7 @@ Output, in --out_dir (default ../data/demo_eval/<run template without {variant},
                  UniProt literature evidence (evidence, via, pubmed) from demo_site_references.py
 """
 import argparse
+import functools
 import glob
 import importlib
 import json
@@ -85,55 +88,80 @@ ENTRY_PREFIXES = [('finetuning_multi', 'ft_multi_residue'), ('finetuning', 'ft_s
 MAX_LOGIT_DIFF = 1e-3
 
 
-# UniProt accession -> (name, canonical sites). A site is a 1-based position in the canonical
-# UniProt isoform, (position, literature name) when the literature numbers it differently, or a
-# sequence context (name, peptide, 0-based index of the site in the peptide). Every site is checked
-# against the sequence when the script runs.
+# UniProt accession -> (name, {UniProt position: position in the numbering the literature uses}).
+# The 20 human proteins with the most site-specific phosphosite papers in UniProt
+# (scripts/uniprot_site_literature.py: distinct ECO:0000269 papers, ties broken by site-papers, then
+# by PhosphoSitePlus rank). STAT1, STAT3, SP1 and TFEB are not in the dbPTM info file; their sequence,
+# dbPTM sites and cluster assignments come from EXTRA_PROTEINS / EXTRA_CLUSTERS (demo_extra_proteins.py).
+# The canonical sites are not listed here: they are the sites labelled functional in CANONICAL_LABELS
+# (see demo_mutagenesis.py).
 DEMO = {
-    'P00533': ('EGFR', [(678, 'T654'), (693, 'T669'), (869, 'Y845'), (1016, 'Y992'), (1070, 'S1046'),
-                        (1071, 'S1047'), (1092, 'Y1068'), (1110, 'Y1086'), (1172, 'Y1148'), (1197, 'Y1173')]),
-    'P31749': ('AKT1', [124, 129, 308, 450, 473]),
-    'P12931': ('SRC', [17, 75, (419, 'Y416'), (530, 'Y527')]),
-    'P28482': ('ERK2', [185, 187]),
-    'P04637': ('TP53', [9, 15, 18, 20, 33, 37, 46, 315, 392]),
-    'P05067': ('APP', [(743, 'T668'), (757, 'Y682')]),
-    # P10636 is the 758-residue PNS isoform; the usual names are 2N4R (441-residue) numbering
-    'P10636': ('MAPT', [('T181', 'KTPPAPKTPPSSG', 7), ('S202', 'SSPGSPGTPGS', 4), ('T205', 'SSPGSPGTPGS', 7),
-                        ('T231', 'VAVVRTPPKSPSS', 5), ('S235', 'VAVVRTPPKSPSS', 9), ('S262', 'KIGSTENLK', 3),
-                        ('S396', 'VYKSPVVSGD', 3), ('S404', 'GDTSPRHLS', 3)]),
-    'P06400': ('RB1', [249, 252, 373, 608, 612, 780, 788, 795, 807, 811, 821, 826]),
-    'P35222': ('CTNNB1', [33, 37, 41, 45, 552, 675, 64, 142]),
-    'P46527': ('CDKN1B', [10, 157, 187, 198, 74, 88]),
-    # The literature names EPOR tyrosines in murine mature numbering (human UniProt position - 25)
-    'P19235': ('EPOR', [(368, 'Y343'), (426, 'Y401'), (454, 'Y429'), (456, 'Y431'), (468, 'Y443'),
-                        (485, 'Y460'), (489, 'Y464'), (504, 'Y479')]),
-    'P51692': ('STAT5B', [699]),
-    'Q92934': ('BAD', [75, 99, 118]),
+    'P04637': ('TP53', {}),
+    'P31749': ('AKT1', {}),
+    # H2AX sites are named without the initiator methionine (S140 is gamma-H2AX S139)
+    'P16104': ('H2AX', {140: 139, 143: 142}),
+    'P46527': ('CDKN1B', {}),
+    'O14757': ('CHEK1', {}),
+    'P42224': ('STAT1', {}),
+    'Q00613': ('HSF1', {}),
+    'P04049': ('RAF1', {}),
+    'P40763': ('STAT3', {}),
+    'Q99683': ('MAP3K5', {}),
+    'Q04206': ('RELA', {}),
+    # EGFR sites are named in mature numbering, without the 24-residue signal peptide
+    'P00533': ('EGFR', {p: p - 24 for p in (693, 1016, 1069, 1092, 1197)}),
+    # P10636 is the 758-residue PNS isoform; the literature uses 2N4R (441-residue) numbering, 317 lower
+    # from the PNS-specific insert on
+    'P10636': ('MAPT', {p: p - 317 for p in (515, 516, 519, 531, 548, 552, 579, 713, 721, 726, 739)}),
+    'P25963': ('NFKBIA', {}),
+    'P08047': ('SP1', {}),
+    'P50750': ('CDK9', {}),
+    'P19484': ('TFEB', {}),
+    'P06401': ('PGR', {}),
+    'Q12778': ('FOXO1', {}),
+    'P35222': ('CTNNB1', {}),
 }
+CANONICAL_LABELS = '../data/demo_eval/mutagenesis_labels.csv'
+EXTRA_PROTEINS = '../data/demo_eval/extra_proteins.json'
+EXTRA_CLUSTERS = '../data/demo_eval/extra_clusters.tsv'
 
 
-def resolve_sites(name, sequence, specs):
-    """[(0-based position, display name)] of the canonical sites, checked against the sequence."""
+def load_extra_proteins(path=EXTRA_PROTEINS):
+    """Info-file rows of the demo proteins missing from the dbPTM info file (demo_extra_proteins.py)."""
+    return pd.read_json(path) if os.path.exists(path) else pd.DataFrame(columns=['id', 'sequence', 'sites', 'parent_id', 'offset'])
+
+
+def demo_sequences(info_path='../data/dbptm/dbptm_info.json'):
+    """{accession: sequence} of every demo protein, from the unchunked info file or the extra proteins."""
+    info = pd.read_json(info_path)
+    extra = load_extra_proteins()
+    out = {**dict(zip(extra['id'], extra['sequence'])),
+           **dict(zip(info['id'], info['sequence']))}
+    missing = set(DEMO) - set(out)
+    if missing:
+        raise SystemExit(f'demo protein(s) {sorted(missing)} neither in {info_path} nor in {EXTRA_PROTEINS} '
+                         f'(run demo_extra_proteins.py)')
+    return {pid: out[pid] for pid in DEMO}
+
+
+@functools.lru_cache(maxsize=None)
+def load_labels(path=CANONICAL_LABELS):
+    """The hand labels of demo_mutagenesis.py: protein, site (UniProt numbering), functional (0/1)."""
+    return pd.read_csv(path)
+
+
+def resolve_sites(pid, sequence, labels=None):
+    """[(0-based position, display name)] of the canonical sites of `pid`: the sites labelled functional,
+    with the literature position in parentheses where it differs, checked against the sequence."""
+    name, aliases = DEMO[pid]
+    labels = load_labels() if labels is None else labels
     out = []
-    for spec in specs:
-        if isinstance(spec, int):
-            spec = (spec, None)
-        if len(spec) == 3:
-            label, peptide, index = spec
-            start = sequence.find(peptide)
-            if start < 0 or sequence.find(peptide, start + 1) >= 0:
-                raise ValueError(f'{name}: context {peptide} of {label} is not unique in the sequence')
-            position = start + index
-            expected = label[0]
-        else:
-            position, alias = spec
-            position -= 1
-            expected = None
-            label = f'{sequence[position]}{position + 1}' + (f' ({alias})' if alias else '')
-        residue = sequence[position]
-        if residue not in 'STY' or (expected is not None and residue != expected):
-            raise ValueError(f'{name}: canonical site {label} is {residue}{position + 1} in the sequence')
-        out.append((position, label))
+    for site in labels.loc[(labels['protein'] == name) & (labels['functional'] == 1), 'site']:
+        residue, position = site[0], int(site[1:])
+        if position > len(sequence) or sequence[position - 1] != residue:
+            raise ValueError(f'{name}: canonical site {site} does not match the sequence')
+        alias = aliases.get(position)
+        out.append((position - 1, site + (f' ({residue}{alias})' if alias else '')))
     return out
 
 
@@ -146,12 +174,20 @@ def label_chunks(chunks, residues, ignore_index):
 
 
 class ProteinInfo:
-    """The chunked info file, with whole proteins rebuilt from their chunks for the demo proteins."""
+    """The chunked info file, with whole proteins rebuilt from their chunks for the demo proteins.
+    Demo proteins missing from it are appended from EXTRA_PROTEINS, under index labels past the file's
+    own, which no splits file refers to."""
 
     def __init__(self, path):
         df = pd.read_json(path)
         if 'parent_id' not in df:
             df['parent_id'], df['offset'] = df['id'], 0
+        extra = load_extra_proteins()
+        extra = extra[extra['parent_id'].isin(set(DEMO) - set(df['parent_id']))]
+        if len(extra):
+            extra = extra[['id', 'sequence', 'sites', 'parent_id', 'offset']].copy()
+            extra.index = range(df.index.max() + 1, df.index.max() + 1 + len(extra))
+            df = pd.concat([df, extra])
         self.df = df
         self.parent_of = df['parent_id']
         demo = df[df['parent_id'].isin(DEMO)]
@@ -183,22 +219,32 @@ class ProteinInfo:
 
 
 def load_clusters():
-    """{identity: Series member -> representative}, for the identity levels whose file exists."""
+    """{identity: Series member -> representative}, for the identity levels whose file exists. The 222
+    proteins listed twice in the info file are listed twice in the cluster files too, with the same
+    representative."""
     out = {}
     for identity, path in CLUSTER_FILES.items():
         if os.path.exists(path):
-            out[identity] = pd.read_csv(path, sep='\t', header=None, names=['rep', 'mem']).set_index('mem')['rep']
+            clusters = pd.read_csv(path, sep='\t', header=None, names=['rep', 'mem']).drop_duplicates('mem')
+            out[identity] = clusters.set_index('mem')['rep']
     return out
 
 
 def cluster_members(clusters):
-    """{identity: {demo protein: set of the other members of its cluster}}"""
+    """{identity: {demo protein: set of the other members of its cluster}}. A protein from
+    EXTRA_CLUSTERS gets the members of every cluster it was assigned to at that level."""
+    extra = pd.read_csv(EXTRA_CLUSTERS, sep='\t') if os.path.exists(EXTRA_CLUSTERS) else None
     out = {}
     for identity, rep_of in clusters.items():
         out[identity] = {}
         for pid in DEMO:
-            rep = rep_of.get(pid)
-            members = set(rep_of.index[rep_of == rep]) if rep is not None else set()
+            if pid in rep_of.index:
+                reps = {rep_of[pid]}
+            elif extra is not None and pid in set(extra['protein']):
+                reps = set(extra.loc[(extra['protein'] == pid) & (extra['identity'] == identity), 'rep'])
+            else:
+                reps = set()
+            members = set(rep_of.index[rep_of.isin(reps)])
             out[identity][pid] = members - {pid}
     return out
 
@@ -221,6 +267,9 @@ def choose_fold(pid, partitions, members, own_identity):
         relation = 'in train (no clean fold)'
     elif mates_in_splits & test:
         relation = 'cluster in test (rep ' + ','.join(sorted(mates_in_splits & test)) + ')'
+        # Only a protein joining several clusters (EXTRA_CLUSTERS) can have them in different folds
+        if counts[own_identity]:
+            relation += f', {counts[own_identity]} member(s) in train (no clean fold)'
     elif not mates_in_splits:
         relation = 'cluster not in splits'
     else:
@@ -482,7 +531,7 @@ def evaluate_run(run, variant, residue, cli, roots, info_cache, clusters, member
                 todo.setdefault(fold, []).append(pid)
 
     rows, selection = [], []
-    for pid, (name, specs) in DEMO.items():
+    for pid, (name, _) in DEMO.items():
         fold, relation, counts = choice[pid]
         if not finished[fold]:
             continue
@@ -490,7 +539,7 @@ def evaluate_run(run, variant, residue, cli, roots, info_cache, clusters, member
         if not candidates:
             continue
         threshold, threshold_source = fold_threshold(metadata, fold)
-        canonical = dict(resolve_sites(name, info.sequence[pid], specs))
+        canonical = dict(resolve_sites(pid, info.sequence[pid], load_labels(cli.canonical)))
         seq = info.sequence[pid]
         for position in sorted(candidates):
             logit = logits.get(position)
@@ -532,6 +581,8 @@ def main():
     parser.add_argument('--entry', default=None, help='Entry point module of the runs (default: from the run name).')
     parser.add_argument('--batch_size', type=int, default=1, help='Batch size for --predict (default: 1).')
     parser.add_argument('--out_dir', default=None, help='Output directory (default: ../data/demo_eval/<template>).')
+    parser.add_argument('--canonical', default=CANONICAL_LABELS,
+                        help='Hand labels of the demo sites (demo_mutagenesis.py); the functional ones are canonical.')
     parser.add_argument('--references', default='../data/demo_eval/canonical_references.csv',
                         help='UniProt evidence of the canonical sites from demo_site_references.py, merged into canonical.csv.')
     cli = parser.parse_args()
