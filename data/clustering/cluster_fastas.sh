@@ -10,7 +10,7 @@ mmseqs createdb "$input_path" seqDB
 # alignment mode 3 = also compute seq. id.
 # cluster mode 2 = greedy incremental
 #
-cluster_args="--min-seq-id 0.3 -c 0 --cov-mode 1 --cluster-mode 1 --alignment-mode 3 -s 6 --single-step-clustering"
+cluster_args="--min-seq-id 0.7 -c 0 --cov-mode 1 --cluster-mode 1 --alignment-mode 3 -s 6 --single-step-clustering"
 cluster_args_path="${output_path%.*}"_cluster_args.txt
 mmseqs cluster seqDB seqDB_clu tmp $cluster_args
 echo "$cluster_args" > "$cluster_args_path"

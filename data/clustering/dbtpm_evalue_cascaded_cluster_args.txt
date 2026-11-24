@@ -1,0 +1,1 @@
+--min-seq-id 0.3 -c 0.1 --cov-mode 5 --cluster-mode 2 --alignment-mode 3 -s 7.5 -k 6 --max-seqs 5000 --min-ungapped-score 0 --cluster-reassign --threads 16
