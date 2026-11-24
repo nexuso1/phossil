@@ -9,8 +9,14 @@
 #       composition of the chunk (what a row attending everywhere equally would get)
 #   offsets.csv / offsets[_enrichment]_<subset>_L<layer>.png  the same by (offset from the query,
 #       kind of key), the enrichment taken against the composition at each offset
-#   locality.csv / locality_<subset>.png  share of a row within d residues of the query, the distance
-#       holding half / 90 % of the mass on residues (NaN past --max_distance), [CLS] / [EOS] mass
+#   locality.csv / locality_<subset>.png  share of a row within d residues of the query, the distances
+#       d10 .. d90 holding 10 .. 90 % of the mass on residues (NaN past --max_distance), [CLS] / [EOS]
+#       mass; locality_curves.csv holds the whole cumulative curve, d = 0 .. --max_distance
+#   head_examples.{png,pdf}  the --examples heads at a readable size, with their attention summed per offset
+#       and per key token; head_examples_locality.{png,pdf} the same heads with a column of the locality
+#       curves of every head beside them, at print size for --print_width mm (default 200, B4 text width);
+#       --from_tables redraws both
+#       from an earlier run's tables (locality only up to --window if it predates locality_curves.csv)
 #   entropy.csv / entropy.png  per head row entropy, normalized by log2(keys) of the chunk
 #   entropy_tests.csv / entropy_<a>_vs_<b>.png  for every --compare pair, the pooled comparison (AUC =
 #       P(normalized entropy of a b row > that of an a row), Mann-Whitney p) and the within protein
@@ -41,6 +47,7 @@ import numpy as np
 import pandas as pd
 
 from matplotlib.colors import LogNorm
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
 from scipy.special import entr, expit
 from scipy.stats import false_discovery_control, mannwhitneyu, wilcoxon
 
@@ -133,7 +140,6 @@ class Accumulator:
     """
     def __init__(self, n_subsets, window, max_distance):
         self.window, self.max_distance = window, max_distance
-        self.reach = max(window, max_distance)
         self.count = np.zeros(n_subsets)
         self.sums, self.background, self.entropy = None, None, []
 
@@ -152,7 +158,7 @@ class Accumulator:
         if self.sums is None:
             self.allocate(n_layers, n_heads)
 
-        sums, background, D, W = self.sums, self.background, self.reach, self.window
+        sums, background, W = self.sums, self.background, self.window
         masks = masks.astype(np.float64)
         self.count += masks.sum(axis=1)
         rows = np.arange(n_rows)
@@ -172,25 +178,26 @@ class Accumulator:
         sums['composition'] += np.einsum('sq,lhqt->slht', masks, by_token)
         background['composition'] += masks @ ((onehot.sum(axis=0) - query_token) / (n_keys - 1))
 
-        # Every residue key within "reach" of the query, by offset; the special columns and the
+        # The residue keys within "window" of the query, by offset; the special columns and the
         # offsets past either end of the chunk are masked out
-        columns = self_column[:, None] + np.arange(-D, D + 1)
+        columns = self_column[:, None] + np.arange(-W, W + 1)
         valid = (columns >= 1) & (columns <= n_keys - 2)
         columns = np.clip(columns, 0, n_keys - 1)
         near = weights[:, :, rows[:, None], columns] * valid
-
-        window = slice(D - W, D + W + 1)
-        keys = onehot[columns[:, window]] * valid[:, window, None]
-        sums['offsets'] += np.einsum('sq,lhqo,qot->slhot', masks, near[..., window], keys, optimize=True)
+        keys = onehot[columns] * valid[..., None]
+        sums['offsets'] += np.einsum('sq,lhqo,qot->slhot', masks, near, keys, optimize=True)
         background['offsets'] += np.einsum('sq,qot->sot', masks, keys) / n_keys
 
-        # Folded onto distance, -d and +d together
-        M = self.max_distance + 1
-        folded, reachable = near[..., D:].copy(), valid[:, D:].astype(np.float64)
-        folded[..., 1:] += near[..., D - 1::-1]
-        reachable[:, 1:] += valid[:, D - 1::-1]
-        sums['distance'] += np.einsum('sq,lhqd->slhd', masks, folded[..., :M])
-        background['distance'] += masks @ reachable[:, :M] / n_keys
+        # Cumulative share within d residues, d = 0 .. max_distance, as the difference of a running
+        # sum over the residue columns at the two ends of [query - d, query + d], clipped to the chunk
+        distance = np.arange(self.max_distance + 1)
+        start = np.clip(self_column[:, None] - 1 - distance, 0, n_keys - 2)
+        stop = np.clip(self_column[:, None] + distance, 0, n_keys - 2)
+        running = np.concatenate([np.zeros(weights.shape[:-1] + (1,), dtype=np.float32),
+                                  np.cumsum(weights[..., 1:-1], axis=-1)], axis=-1)
+        within = running[:, :, rows[:, None], stop] - running[:, :, rows[:, None], start]
+        sums['distance'] += np.einsum('sq,lhqd->slhd', masks, within, optimize=True)
+        background['distance'] += masks @ ((stop - start) / n_keys)
 
         sums['special'] += np.einsum('sq,lhqc->slhc', masks, weights[..., [0, -1]])
         background['special'] += masks.sum(axis=1, keepdims=True) / n_keys
@@ -310,15 +317,16 @@ def build_tables(acc, layers, rows, subsets, comparisons, min_rows):
     out['offsets'] = long_table({'mass' : means['offsets'], 'enrichment' : out['offsets_enrichment']},
                                 **axes, offset=offsets, token=TOKENS)
 
-    curves = out['curves'] = np.cumsum(means['distance'], axis=-1)
+    curves = out['curves'] = means['distance']
     residue_mass = 1 - means['special'].sum(axis=-1)
     locality = {f'within_{d}' : curves[..., d] for d in WITHIN if d <= acc.max_distance}
-    for share in (0.5, 0.9):
+    for share in (0.1, 0.25, 0.5, 0.75, 0.9):
         reached = curves >= share * residue_mass[..., None]
         locality[f'd{int(share * 100)}'] = np.where(reached.any(axis=-1), reached.argmax(axis=-1), np.nan)
     locality.update(cls_mass=means['special'][..., 0], eos_mass=means['special'][..., 1],
                     far_mass=residue_mass - curves[..., -1])
     out['locality'] = long_table(locality, **axes)
+    out['locality_curves'] = long_table({'within' : curves}, **axes, distance=list(range(acc.max_distance + 1)))
 
     # Entropy, one row per query: (rows, layers, heads + mixture), normalized by log2(keys)
     bits = np.concatenate(acc.entropy)
@@ -401,6 +409,10 @@ def plot_locality(curves, n_heads, layers, title, path, marks=(5, 25)):
         left.plot(distances, curve[:n_heads].T, lw=1, alpha=0.8, color='0.6')
         left.plot(distances, curve[MIXTURE], lw=2.2, color='C0', label='mixture')
         left.plot(distances, curve[BACKGROUND], lw=1.6, ls=':', color='black', label='uniform row')
+        left.set_xscale('symlog', linthresh=1)       # Linear up to 1, logarithmic beyond
+        left.xaxis.set_major_formatter(ScalarFormatter())
+        for mark in marks:
+            left.axvline(mark, color='0.8', lw=0.8, ls='--', zorder=0)
         left.set_ylabel(f'layer {layer}\nshare of a row within')
         left.legend(fontsize=8, loc='lower right')
         width = 0.8 / len(marks)
@@ -413,6 +425,146 @@ def plot_locality(curves, n_heads, layers, title, path, marks=(5, 25)):
     axes[-1, 1].set_xlabel('head (dotted: uniform row)')
     fig.suptitle(title)
     save(fig, path)
+
+# Font sizes of the figures meant for a page: PRINT for a two-column page width, read at 100 %
+PRINT = {'font.size' : 7, 'axes.titlesize' : 7.5, 'axes.labelsize' : 7, 'xtick.labelsize' : 6,
+         'ytick.labelsize' : 6, 'legend.fontsize' : 6, 'figure.titlesize' : 8}
+SCREEN = {'font.size' : 10, 'axes.titlesize' : 12, 'legend.fontsize' : 8}
+EXAMPLE_COLORS = ['C1', 'C2', 'C4', 'C5', 'C6']
+
+def save_both(fig, path):
+    """The figure as .png and as .pdf next to it."""
+    fig.savefig(os.path.splitext(path)[0] + '.pdf')
+    save(fig, path)
+
+def example_title(layer, head, label):
+    return f'layer {layer}, head {head}' + (f': {label}' if label else '')
+
+def example_grids(offsets, subset, layer, head):
+    """(key token, offset) share of one head and of the uniform row, from the long offsets table."""
+    rows = offsets[(offsets['subset'] == subset) & (offsets['layer'] == layer)]
+    grids = [rows[rows['head'] == h].pivot(index='token', columns='offset', values='mass').reindex(TOKENS)
+             for h in (head, BACKGROUND)]
+    if grids[0].columns.empty:
+        raise SystemExit(f'No layer {layer} head {head} in the offsets of subset {subset}')
+    return grids
+
+def draw_example(sub, grid, composition, title, title_color='black', token_size=10, offset_step=1,
+                 share_label='average share', side_width=1.25):
+    """
+    One head in a subfigure: its (key token, offset) map, its attention summed per offset above, and
+    per key token beside (the query's own column left out) with ticks at the average share, what the
+    composition at those offsets would give a head spreading the same total evenly over the residues
+    there. A head that reads a position is one tall bar above; one that reads a kind of residue has
+    bars far off their ticks beside.
+    """
+    offset_labels = list(grid.columns)
+    (top, corner), (main, side) = sub.subplots(2, 2, height_ratios=[1, 4], width_ratios=[4, side_width],
+                                               sharex='col', sharey='row')
+    corner.axis('off')
+
+    vmax = np.nanmax(grid.to_numpy())
+    image = main.imshow(np.ma.masked_invalid(grid.to_numpy()), aspect='auto', interpolation='nearest',
+                        cmap=MAGMA, norm=LogNorm(vmin=vmax / 1000, vmax=vmax))
+    main.axvline(offset_labels.index(0), color='cyan', lw=0.8, ls='--', alpha=0.7)
+    main.set_xticks(range(0, len(offset_labels), offset_step), offset_labels[::offset_step])
+    main.set_yticks(range(len(TOKENS)), TOKENS, fontsize=token_size)
+    main.set_xlabel('offset from the query')
+    sub.colorbar(image, ax=main, location='bottom', shrink=0.7, label='share of a row')
+
+    top.bar(range(len(offset_labels)), grid.sum(axis=0), color='0.35')
+    top.set_ylabel('per offset')
+    top.set_title(title, color=title_color)
+
+    others = grid.drop(columns=0).sum(axis=1)
+    composition = composition.drop(columns=0)
+    expected = others.sum() * composition.sum(axis=1) / composition.to_numpy().sum()
+    side.barh(range(len(TOKENS)), others, color='0.35')
+    side.plot(expected, range(len(TOKENS)), '|', color='C3', ms=token_size * 0.9, mew=1.5, label=share_label)
+    side.xaxis.set_major_locator(MaxNLocator(2))
+    side.set_xlabel('per key token\n(query left out)')
+    # In the empty corner, off the data, and left out of the layout so that it cannot widen the column
+    corner.legend(*side.get_legend_handles_labels(), loc='center', handlelength=0.8, handletextpad=0.4,
+                  borderpad=0.3).set_in_layout(False)
+
+def plot_head_examples(offsets, subset, examples, path):
+    """The --examples heads side by side at screen size, see draw_example."""
+    with plt.rc_context(SCREEN):
+        fig = plt.figure(figsize=(7 * len(examples), 8.5), layout='constrained')
+        for sub, (layer, head, label) in zip(np.atleast_1d(fig.subfigures(1, len(examples))), examples):
+            draw_example(sub, *example_grids(offsets, subset, layer, head), example_title(layer, head, label))
+        fig.suptitle(f'{subset}: example heads, attention by offset and key token within '
+                     f'±{offsets["offset"].max()}')
+        save_both(fig, path)
+
+def table_curves(folder, offsets, subset):
+    """
+    Locality curves of one subset from the tables of an earlier run, as (layers, layers' curves):
+    the curves are (layers, heads + BACKGROUND + MIXTURE, distances). Runs from before
+    locality_curves.csv existed get the exact curve up to the offset window, rebuilt from offsets.csv.
+    """
+    path = os.path.join(folder, 'locality_curves.csv')
+    if os.path.exists(path):
+        table, column, value = pd.read_csv(path), 'distance', 'within'
+    else:
+        print(f'No {path}, the locality panels stop at the offset window; rerun for the whole curve')
+        table, column, value = offsets, 'offset', 'mass'
+    table = table[table['subset'] == subset]
+    layers = sorted(table['layer'].unique())
+    heads = sorted(head for head in table['head'].unique() if head >= 0) + [BACKGROUND, MIXTURE]
+    grid = (table.pivot_table(index=['layer', 'head'], columns=column, values=value, aggfunc='sum')
+            .reindex(pd.MultiIndex.from_product([layers, heads])).to_numpy())
+    if column == 'offset':
+        window = grid.shape[1] // 2
+        folded = grid[:, window:].copy()
+        folded[:, 1:] += grid[:, window - 1::-1]
+        grid = folded.cumsum(axis=1)
+    return layers, grid.reshape(len(layers), len(heads), -1)
+
+def plot_examples_locality(offsets, curves, layers, subset, examples, path, width=200):
+    """
+    A figure spanning both columns of a page "width" mm wide (the text width, so that it is placed
+    unscaled): the --examples heads side by side (see draw_example) and, in a column on their right,
+    how much of a row lies within d residues of the query for every head, one panel per layer, the
+    example heads in their title's color.
+    """
+    n_heads = curves.shape[1] - 2
+    distances = np.arange(curves.shape[-1])
+    with plt.rc_context(PRINT):
+        fig = plt.figure(figsize=(width / 25.4, 4.0), layout='constrained')
+        subs = fig.subfigures(1, len(examples) + 1, width_ratios=[2.65] * len(examples) + [1.7], wspace=0.02)
+        for sub, (layer, head, label), color, letter in zip(subs[:-1], examples, EXAMPLE_COLORS, 'abcdefgh'):
+            draw_example(sub, *example_grids(offsets, subset, layer, head),
+                         f'({letter}) {example_title(layer, head, label)}', color, token_size=6.5, offset_step=4,
+                         share_label='avg. share', side_width=1.6)
+
+        column = subs[-1]
+        axes = np.atleast_1d(column.subplots(len(layers), 1, sharex=True, sharey=True))
+        legend = {}
+        for ax, layer, curve in zip(axes, layers, curves):
+            ax.plot(distances, curve[:n_heads].T, color='0.78', lw=0.6)[0].set_label('single heads')
+            ax.plot(distances, curve[MIXTURE], color='C0', lw=1.5, label='head mean')
+            ax.plot(distances, curve[BACKGROUND], color='black', ls=':', lw=1.1, label='uniform row')
+            for (example_layer, head, _), color, letter in zip(examples, EXAMPLE_COLORS, 'abcdefgh'):
+                if example_layer == layer:
+                    ax.plot(distances, curve[head], color=color, lw=1.5, label=f'({letter}) head {head}')
+            if distances[-1] > 30:
+                ax.set_xscale('symlog', linthresh=1)
+                ax.xaxis.set_major_formatter(ScalarFormatter())
+            else:
+                ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+            ax.set_xlim(0, distances[-1])
+            ax.set_yticks([0, 0.5, 1])
+            ax.set_ylabel(f'layer {layer}')
+            for handle, label in zip(*ax.get_legend_handles_labels()):
+                legend.setdefault(label, handle)
+        axes[-1].set_xlabel('d, residues from the query')
+        # The shared lines first, then the example heads in panel order
+        order = [label for label in legend if not label.startswith('(')] + sorted(l for l in legend if l.startswith('('))
+        column.legend([legend[label] for label in order], order, loc='outside lower center', ncol=2,
+                      handlelength=1.3, columnspacing=0.8)
+        column.suptitle(f'({"abcdefgh"[len(examples)]}) share of a row within d', fontsize=PRINT['axes.titlesize'])
+        save_both(fig, path)
 
 def plot_entropy(grids, subsets, layers, heads, path):
     """Mean normalized row entropy as a layer by head grid, one panel per subset."""
@@ -460,18 +612,17 @@ def plot_all(out, layers, subsets, comparisons, window, folder):
     offsets = list(range(-window, window + 1))
     for s, subset in enumerate(subsets):
         name = subset.replace(':', '_')
-        n_rows = len(out['norm'][out['masks'][subset]])
         for l, layer in enumerate(layers):
             for enrichment, grids in ((False, out['means']['offsets']), (True, out['offsets_enrichment'])):
                 kind = 'enrichment' if enrichment else 'share'
                 plot_offsets(grids[s, l, heads], heads, offsets,
-                             f'{subset} ({n_rows} rows), layer {layer}: attention by offset and key token ({kind})',
+                             f'{subset}, layer {layer}: attention by offset and key token ({kind})',
                              os.path.join(folder, f'offsets{"_enrichment" if enrichment else ""}_{name}_L{layer}.png'),
                              enrichment)
         plot_composition(out['composition_enrichment'][s][:, heads], heads, layers,
-                         f'{subset} ({n_rows} rows): log2 share of a row by key token over the composition, '
-                         'query residue taken out', os.path.join(folder, f'composition_{name}.png'))
-        plot_locality(out['curves'][s], n_heads, layers, f'{subset} ({n_rows} rows): how local each head is',
+                         f'{subset}: log2 share of a row by key token over the composition, query residue taken out',
+                         os.path.join(folder, f'composition_{name}.png'))
+        plot_locality(out['curves'][s], n_heads, layers, f'{subset}: how local each head is',
                       os.path.join(folder, f'locality_{name}.png'))
 
     plot_entropy(out['entropy_grid'], subsets, layers, heads, os.path.join(folder, 'entropy.png'))
@@ -491,6 +642,25 @@ def main(args):
     if args.compare is None:
         args.compare = [f'{a}/{b}' for a, b in (('non-site', 'site'), ('TN', 'TP'))
                         if a in args.subsets and b in args.subsets]
+    examples = []
+    for example in args.examples or []:
+        parts = example.split(':', 2)
+        if len(parts) < 2 or not all(part.lstrip('-').isdigit() for part in parts[:2]):
+            raise SystemExit(f'--examples takes layer:head[:label], e.g. 32:4:residue-specific, not {example!r}')
+        examples.append((int(parts[0]), int(parts[1]), parts[2] if len(parts) > 2 else ''))
+    example_subset = 'all' if 'all' in args.subsets else args.subsets[0]
+    examples_path = os.path.join(args.out, 'head_examples.png')
+    combined_path = os.path.join(args.out, 'head_examples_locality.png')
+    if args.from_tables:
+        if not examples:
+            raise SystemExit('--from_tables only redraws the head examples figures, give --examples')
+        offsets = pd.read_csv(os.path.join(args.out, 'offsets.csv'))
+        plot_head_examples(offsets, example_subset, examples, examples_path)
+        plot_examples_locality(offsets, *table_curves(args.out, offsets, example_subset)[::-1], example_subset,
+                               examples, combined_path, args.print_width)
+        print(f'Written to {examples_path} and {combined_path}')
+        return
+
     comparisons = [tuple(pair.split('/')) for pair in args.compare]
     for pair in comparisons:
         if len(pair) != 2 or not set(pair) <= set(args.subsets):
@@ -514,12 +684,16 @@ def main(args):
     out = build_tables(acc, layers, rows, args.subsets, comparisons, args.min_rows)
 
     os.makedirs(args.out, exist_ok=True)
-    for name in ('composition', 'offsets', 'locality', 'entropy', 'entropy_tests'):
-        out[name].to_csv(os.path.join(args.out, f'{name}.csv'), index=False)
+    for name in ('composition', 'offsets', 'locality', 'locality_curves', 'entropy', 'entropy_tests'):
+        out[name].to_csv(os.path.join(args.out, f'{name}.csv'), index=False, float_format='%.6g')
     with open(os.path.join(args.out, 'args.json'), 'w') as f:
         json.dump(vars(args) | {'layers' : layers}, f, indent=2)
     if not args.no_plots:
         plot_all(out, layers, args.subsets, comparisons, args.window, args.out)
+        if examples:
+            plot_head_examples(out['offsets'], example_subset, examples, examples_path)
+            plot_examples_locality(out['offsets'], out['curves'][args.subsets.index(example_subset)], layers,
+                                   example_subset, examples, combined_path, args.print_width)
 
     print(f'Layers {layers}, {rows["protein"].nunique()} proteins, {len(rows)} query rows')
     for spec, mask in out['masks'].items():
@@ -553,7 +727,16 @@ if __name__ == '__main__':
                         help='Prediction file prefix in fold_N, e.g. a *_whole_preds of evaluate_checkpoints.py.')
     parser.add_argument('--threshold', default='0.5', help='Probability cutoff of the outcomes, or "opt" for the fold\'s opt_threshold.')
     parser.add_argument('--window', type=int, default=12, help='Offsets either side of the query in the offset maps.')
-    parser.add_argument('--max_distance', type=int, default=64, help='Longest distance of the locality curves.')
+    parser.add_argument('--max_distance', type=int, default=1022,
+                        help='Longest distance of the locality curves (default 1022, a whole chunk, so every d10 .. d90 exists).')
+    parser.add_argument('--examples', nargs='+', default=None,
+                        help='layer:head[:label] heads drawn large in head_examples.png and, with the locality curves, '
+                             'in head_examples_locality.png (subset all), e.g. 32:4:residue-specific 31:8:position-specific.')
+    parser.add_argument('--from_tables', action='store_true',
+                        help='Only redraw the --examples figures from the tables already in --out, reading no dumps.')
+    parser.add_argument('--print_width', type=float, default=200,
+                        help='Width of head_examples_locality in mm, the \\textwidth it is placed at unscaled '
+                             '(default 200, B4 with 25 mm margins).')
     parser.add_argument('--min_rows', type=int, default=2,
                         help='Rows a protein needs in each group to enter the within protein test.')
     parser.add_argument('--no_plots', action='store_true', help='Only write the tables, the figures take most of the time.')

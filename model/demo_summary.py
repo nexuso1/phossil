@@ -66,8 +66,12 @@ def fold_kind(relation):
     return "test fold of its cluster's representative"
 
 
-# Markdown marks of fold_kind; † for the representative's fold, ‡ where every fold trained on a cluster member
-MARKS = {'own test fold': '', "test fold of its cluster's representative": '†', 'no clean fold': '‡'}
+# Markdown marks of fold_kind: the representative's fold is the common case and unmarked
+MARKS = {'own test fold': '†', "test fold of its cluster's representative": '', 'no clean fold': '‡'}
+LEGEND = ("Every protein is scored by a fold that trained on no member of its cluster, usually the one whose test "
+          "set holds the cluster's representative; † its own test fold, the protein being that representative (for "
+          "S+T: for both the S and the T model); ‡ no such fold exists, as the protein joins clusters that are in "
+          "different folds. The predictions are always the protein's own.")
 
 
 def fmt(x, digits=2):
@@ -84,12 +88,9 @@ def markdown(overall, proteins, relation):
     identities = sorted(proteins.index.get_level_values('identity').unique())
     for group in SHOWN:
         lines += ['', f'## Per protein, {group}', '',
-                  'AUROC / AP, then sites called at the tuned threshold (TP/sites, FP), then canonical sites called. '
-                  "† not in the splits itself, only its cluster's representative is (for S+T: for the S or the T model); "
-                  "scored by the fold whose test set holds that representative, so its model trained on no member of the "
-                  "protein's cluster. The predictions are always the protein's own. ‡ the protein joins clusters "
-              "that are in different folds, so every fold trained on a member of one.", '',
-                  '| Protein | Sites | ' + ' | '.join(f'{i} % AUROC / AP | {i} % TP/sites (FP) | {i} % canonical'
+                  'AP / AUROC, then sites called at the tuned threshold (TP/sites, FP), then canonical sites called. '
+                  + LEGEND, '',
+                  '| Protein | Sites | ' + ' | '.join(f'{i} % AP / AUROC | {i} % TP/sites (FP) | {i} % canonical'
                                                      for i in identities) + ' |',
                   '|---|---:|' + '---:|---:|---:|' * len(identities)]
         sub = proteins.xs(group, level='group')
@@ -98,7 +99,7 @@ def markdown(overall, proteins, relation):
             for identity in identities:
                 r = sub.loc[(identity, protein)]
                 mark = MARKS[fold_kind(relation.get((identity, group, protein), ''))]
-                cells += [f'{fmt(r.auroc)} / {fmt(r.ap)}{mark}', f'{r.TP:.0f}/{r.n_pos:.0f} ({r.FP:.0f})',
+                cells += [f'{fmt(r.ap)} / {fmt(r.auroc)}{mark}', f'{r.TP:.0f}/{r.n_pos:.0f} ({r.FP:.0f})',
                           f'{r.canonical_called:.0f}/{r.n_canonical:.0f}' if r.n_canonical else '–']
             n_pos = sub.loc[(identities[0], protein), 'n_pos']
             lines.append(f'| {protein} | {n_pos:.0f} | ' + ' | '.join(cells) + ' |')
@@ -123,11 +124,12 @@ def by_identity(proteins, sites, relation):
                 row[f'{group} missed canonical'] = missed.get((identity, group, protein), '')
                 row[f'{group} fold'] = fold_kind(relation.get((identity, group, protein), ''))
             rows.append(row)
-        table = pd.DataFrame(rows)
+        # Highest S+T average precision first, as in scripts/table_demo_identity.py
+        table = pd.DataFrame(rows).sort_values(f'{SHOWN[0]} ap', ascending=False, na_position='last', kind='stable')
         tables[identity] = table
 
         lines += [f'## {identity} % identity', '',
-                  '| Protein | ' + ' | '.join(f'{g} sites | {g} AUROC / AP | {g} TP / FP / FN | {g} canonical called '
+                  '| Protein | ' + ' | '.join(f'{g} sites | {g} AP / AUROC | {g} TP / FP / FN | {g} canonical called '
                                               f'| {g} canonical missed' for g in SHOWN) + ' |',
                   '|---|' + '---:|---:|---:|---:|---|' * len(SHOWN)]
         for _, r in table.iterrows():
@@ -135,7 +137,7 @@ def by_identity(proteins, sites, relation):
             for g in SHOWN:
                 mark = MARKS[r[f'{g} fold']]
                 cells += [f'{r[f"{g} n_pos"]:.0f}/{r[f"{g} n_cand"]:.0f}',
-                          f'{fmt(r[f"{g} auroc"])} / {fmt(r[f"{g} ap"])}{mark}',
+                          f'{fmt(r[f"{g} ap"])} / {fmt(r[f"{g} auroc"])}{mark}',
                           f'{r[f"{g} TP"]:.0f} / {r[f"{g} FP"]:.0f} / {r[f"{g} FN"]:.0f}',
                           f'{r[f"{g} canonical_called"]:.0f}/{r[f"{g} n_canonical"]:.0f}' if r[f'{g} n_canonical'] else '–',
                           r[f'{g} missed canonical'] or '–']
@@ -143,12 +145,8 @@ def by_identity(proteins, sites, relation):
         lines.append('')
     header = ['# Demo proteins by identity version', '',
               'One table per identity version of the run family, one row per protein. Sites: known sites / '
-              'candidate residues. TP / FP / FN and canonical sites at the fold\'s tuned threshold. '
-              "† not in the splits itself, only its cluster's representative is (for S+T: for the S or the T model); "
-              "scored by the fold whose test set holds that representative, so its model trained on no member of the "
-              "protein's cluster. The predictions are always the protein's own. ‡ the protein joins clusters "
-              "that are in different folds, so every fold trained on a member of one.", '',
-              'AUROC / AP are undefined (–) when every candidate is a site.', '']
+              'candidate residues. TP / FP / FN and canonical sites at the fold\'s tuned threshold. ' + LEGEND, '',
+              'AP / AUROC are undefined (–) when every candidate is a site.', '']
     return tables, '\n'.join(header + lines)
 
 
@@ -178,7 +176,7 @@ def main():
     for frame in (overall, proteins):
         for c in ['n_cand', 'n_pos', 'TP', 'FP', 'FN', 'n_canonical', 'canonical_called']:
             frame[c] = frame[c].astype(int)
-    # The protein itself is in its fold's test set, or (†) it is not in the splits and the fold is the one
+    # The protein itself is in its fold's test set (†), or it is not in the splits and the fold is the one
     # testing its cluster's representative; a pooled S+T relation reads e.g.
     # 'S:in test T:cluster in test (rep X)' and counts as the protein itself only if both parts do
     relation = {}
