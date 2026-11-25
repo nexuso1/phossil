@@ -7,8 +7,10 @@
 #
 #   --index          PBS job array index, selects the residue set (required)
 #   --job_script     script to launch (required)
-#   --dataset        dbptm | phos | deeppsp (required)
-#   --splits_suffix  suffix of the splits file, e.g. "_max" (default: empty)
+#   --dataset        dbptm | dbptm_v2 | phos | deeppsp (required); dbptm_v2 is the rebuilt dbPTM
+#                    info file (scripts/build_dbptm_info.py) and its clusterings in data/dbptm_v2
+#   --splits_suffix  suffix of the splits file, e.g. "_max" (default: empty); for dbptm_v2
+#                    "_chunked[_50|_70]_sc" (set cover) or "_chunked[_50|_70][_c20|_c20_both]_max"
 #   --type           model type passed to the job script
 #   --pos_weight     positive class weight (default: empty, the training default)
 #   --data_dir       root of the data directory (default: <repo dir>/data)
@@ -22,7 +24,7 @@
 set -u
 
 usage() {
-    sed -n '2,22p' "$0"
+    awk 'NR > 1 && /^#/ {print; next} NR > 1 {exit}' "$0"
     exit "${1:-1}"
 }
 
@@ -99,7 +101,7 @@ if [[ ! "$index" =~ ^[0-9]+$ ]] || [[ -z "${residues[$index]+set}" ]]; then
 fi
 
 declare -A prot_info
-prot_info=( ["dbptm"]="$data_dir"/dbptm/dbptm_info_chunked.json ["phos"]="$data_dir"/phosphosite_sequences/phosphosite_df_chunked.json ["deeppsp"]="$data_dir"/deeppsp/dpsp_info_"${residues[$index]}"_chunked.json )
+prot_info=( ["dbptm"]="$data_dir"/dbptm/dbptm_info_chunked.json ["dbptm_v2"]="$data_dir"/dbptm_v2/dbptm_info_chunked.json ["phos"]="$data_dir"/phosphosite_sequences/phosphosite_df_chunked.json ["deeppsp"]="$data_dir"/deeppsp/dpsp_info_"${residues[$index]}"_chunked.json )
 suffix="$dataset""$splits_suffix"
 
 if [[ -z "${prot_info[$dataset]+set}" ]]; then
@@ -108,6 +110,14 @@ if [[ -z "${prot_info[$dataset]+set}" ]]; then
 fi
 
 splits_path="$data_dir"/"$dataset"/splits_"${residues[$index]}""$splits_suffix".json
+
+# A wrong suffix would otherwise only fail inside the job, after the environment is set up
+for path in "$splits_path" "${prot_info[$dataset]}"; do
+    if [[ ! -f "$path" ]]; then
+        echo "Missing file: $path" >&2
+        exit 1
+    fi
+done
 
 out_dirname="$name"_"${residues[$index]}"_"$pos_weight"_"$type"_"$suffix"
 
