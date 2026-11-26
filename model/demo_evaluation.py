@@ -1,35 +1,57 @@
 """Per-protein demo evaluation of one run family on a fixed set of well-known phosphoproteins.
 
 For every residue model of the family (e.g. the S, T and Y runs) and every clustering identity
-version (30/50/70 %), each demo protein is scored by the fold model that never trained on it or on
-its cluster, and the result is reported per candidate residue, per protein and per canonical site.
+version (30/50/70 %), each demo protein is scored by the fold model that trained on as little of it as
+possible: not on the protein, and as few of its sites as possible inside the aligned region of a training
+homolog. The result is reported per candidate residue, per protein and per canonical site.
 The canonical sites are the sites labelled functional in --canonical, hand labels of each protein's
 UniProt phosphosite mutants (see demo_mutagenesis.py).
 
     cd model
     python demo_evaluation.py --run 'finetuning_drop_{res}_2_650M_dbptm_{variant}'
     python demo_evaluation.py --run 'lora_rank16_{res}_2_650M_dbptm_{variant}' --residues S T Y
+    python demo_evaluation.py --run 'finetuning_drop_{res}_2_650M_dbptm_v2_{variant}' \
+        --variants chunked_sc chunked_50_sc chunked_70_sc
     # on the machine with the checkpoints, to fill in what no saved prediction covers:
     python demo_evaluation.py --run '...' --predict --ckpt_root new_logs
 
-`{res}` is replaced by each of --residues and `{variant}` by each of --variants (chunked_max,
-chunked_50_max, chunked_70_max). The S and T runs are also pooled into an "S+T" group, each residue
-scored by its own model and its own fold threshold.
+`{res}` is replaced by each of --residues and `{variant}` by each of --variants (default chunked_max,
+chunked_50_max, chunked_70_max; any chunked[_50|_70][<clustering suffix>]_max, e.g. chunked_50_c20_max,
+or the set-cover chunked[_50|_70]_sc). The S and T runs are also pooled into an "S+T" group, each residue
+scored by its own model and its own fold threshold. The info file, the cluster files and the searches
+are those of the run's own dataset (the folder of its prot_info_path).
 
 Choice of fold
 --------------
-Each run's splits hold one protein per cluster of its identity level (dbptm_clusters.tsv at 30 %,
-dbptm_50.tsv, dbptm_70.tsv). Folds are ranked by, in order:
+Each run's splits hold one protein per cluster of its identity level: dbptm_clusters<suffix>.tsv at
+30 %, dbptm_50<suffix>.tsv, dbptm_70<suffix>.tsv for the connected components, and the residue set's
+own dbptm_clusters_sc_<res>.tsv, dbptm_50_sc_<res>.tsv, dbptm_70_sc_<res>.tsv for the set cover.
+A homolog at an identity level is a protein with a hit at or above it (fident, E-value at most 1e-3) in
+the union of the dataset's all-against-all searches (--hits, by default every similarity*/all_vs_all.m8
+of the dataset folder: all_vs_all_search.sh). Folds are ranked by, in order:
   1. whether the protein itself is in the fold's train or dev partition,
-  2. how many members of its cluster at the run's identity level are in train/dev,
-  3. how many members of its clusters at the other identity levels are in train/dev, 30 % first,
-and the first fold wins (ties go to the lowest fold). So a protein in a test set is scored by that
-fold. A protein that is not in the splits (its cluster is represented by another member) is scored
-by the fold whose test set holds that representative, so no member of its cluster was trained on.
-A cluster with no member in the splits is unconstrained at its own level, and rule 3 picks the fold
-with the fewest lower-identity homologs. The `relation` column says which case applies, and the
-`train_mates_<id>` columns how many cluster members at each identity level the chosen fold trained on.
-At 50 % and 70 % those lower-identity homologs are expected: that is what the higher threshold means.
+  2. the identity of its closest train/dev homolog at the run's identity level whose aligned region
+     covers a candidate of the protein (0 without one), then how many of the protein's sites (of the
+     run's residues) such regions cover, then how many of its candidates,
+  3. how many members of its cluster at the run's identity level are in train/dev,
+  4. rules 2 and 3 at the other identity levels, 30 % first,
+and the first fold wins (ties go to the lowest fold). With connected components no hit joins two
+clusters, so a protein in a test set is scored by that fold, and a protein not in the splits (its
+cluster is represented by another member) by the fold whose test set holds that representative, so no
+member of its cluster was trained on. Under set cover only the centres are free of hits to each other:
+a protein that is no centre can have homologs at the level in clusters of other folds, and at 30 % many
+(the kinases, NFKBIA, SP1, CDK9) have them in every fold. Rule 2 then picks the fold whose closest such
+homolog is least similar, and among equally close ones the fold that trained on the fewest of its sites.
+As identity comes before cluster membership, a fold that trained on a cluster member can win (AKT1, 70 %,
+dbptm: every fold trains on a 0.82–0.83 homolog the clustering's --max-seqs 20 missed). A cluster with no member in the splits is unconstrained at its own level, and rule 4
+picks the fold with the fewest lower-identity homologs. The `relation` column says which case applies
+("no clean fold" when the chosen fold trained on the protein's cluster or on a homolog covering any of
+its candidates). Per identity level, `train_mates_<id>` counts the cluster members the chosen fold
+trained on, `homologs_<id>` its train/dev homologs aligned to a candidate, `homolog_fident_<id>` the closest of them, `homolog_sites_<id>` / `homolog_cands_<id>` the
+protein's sites / candidates their aligned regions cover, and `max_train_fident` is the closest train/dev
+hit at any identity. The homolog columns are empty for the proteins of EXTRA_PROTEINS, which no search
+holds, or without any search. At 50 % and 70 % lower-identity homologs are expected: that is what the
+higher threshold means.
 
 Sources of predictions
 ----------------------
@@ -64,6 +86,7 @@ import glob
 import importlib
 import json
 import os
+import re
 import warnings
 from argparse import Namespace
 from functools import partial
@@ -74,10 +97,33 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from data_loading import labeling_fn, parse_residues
 
-# Splits variant -> identity threshold it was clustered at, and the cluster file of each threshold
-VARIANTS = {'chunked_max': 30, 'chunked_50_max': 50, 'chunked_70_max': 70}
+# Splits variant: chunked[_50|_70]<clustering suffix>_max, one protein per connected-component cluster
+# (dataset_creation.py), or chunked[_50|_70]_sc, one centre per set-cover cluster (set_cover_clusters.py)
+VARIANT_RE = re.compile(r'chunked(?:_(50|70))?(.*?)_(max|sc)')
+DEFAULT_VARIANTS = ['chunked_max', 'chunked_50_max', 'chunked_70_max']
+IDENTITIES = (30, 50, 70)
+# The connected-component clustering of data/dbptm, the one EXTRA_CLUSTERS was assigned against
 CLUSTER_FILES = {30: '../data/dbptm/dbptm_clusters.tsv', 50: '../data/dbptm/dbptm_50.tsv',
                  70: '../data/dbptm/dbptm_70.tsv'}
+# Hits above this E-value do not count as homologs (the MMseqs2 default every clustering used)
+MAX_EVALUE = 1e-3
+
+
+def parse_variant(variant):
+    """(identity, clustering suffix, 'max' or 'sc') of a splits variant."""
+    m = VARIANT_RE.fullmatch(variant)
+    if m is None:
+        raise ValueError(f'unknown splits variant {variant!r} (expected chunked[_50|_70][<suffix>]_max or ..._sc)')
+    return int(m.group(1) or 30), m.group(2), m.group(3)
+
+
+def cluster_files(data_dir, variant, residue):
+    """{identity: cluster file} of the clustering a variant's splits come from. The set cover clusters every
+    residue set separately (dbptm_clusters_sc_<R>.tsv), the connected components once for all of them."""
+    _, suffix, kind = parse_variant(variant)
+    tail = suffix + (f'_sc_{residue}' if kind == 'sc' else '')
+    names = {30: 'dbptm_clusters', 50: 'dbptm_50', 70: 'dbptm_70'}
+    return {i: os.path.normpath(os.path.join(data_dir, f'{names[i]}{tail}.tsv')) for i in IDENTITIES}
 
 # Run name prefix -> entry point whose create_model rebuilds it (first match wins)
 ENTRY_PREFIXES = [('finetuning_multi', 'ft_multi_residue'), ('finetuning', 'ft_selective'),
@@ -188,6 +234,8 @@ class ProteinInfo:
             extra = extra[['id', 'sequence', 'sites', 'parent_id', 'offset']].copy()
             extra.index = range(df.index.max() + 1, df.index.max() + 1 + len(extra))
             df = pd.concat([df, extra])
+        # Not in the info file, so neither in its all-against-all searches
+        self.extra = set(extra['parent_id'])
         self.df = df
         self.parent_of = df['parent_id']
         demo = df[df['parent_id'].isin(DEMO)]
@@ -218,22 +266,23 @@ class ProteinInfo:
         return label_chunks(self.df[self.df['parent_id'].isin(proteins)], residues, ignore_index)
 
 
-def load_clusters():
+def load_clusters(files=CLUSTER_FILES):
     """{identity: Series member -> representative}, for the identity levels whose file exists. The 222
-    proteins listed twice in the info file are listed twice in the cluster files too, with the same
+    proteins listed twice in the old info file are listed twice in its cluster files too, with the same
     representative."""
     out = {}
-    for identity, path in CLUSTER_FILES.items():
+    for identity, path in files.items():
         if os.path.exists(path):
             clusters = pd.read_csv(path, sep='\t', header=None, names=['rep', 'mem']).drop_duplicates('mem')
             out[identity] = clusters.set_index('mem')['rep']
     return out
 
 
-def cluster_members(clusters):
-    """{identity: {demo protein: set of the other members of its cluster}}. A protein from
-    EXTRA_CLUSTERS gets the members of every cluster it was assigned to at that level."""
-    extra = pd.read_csv(EXTRA_CLUSTERS, sep='\t') if os.path.exists(EXTRA_CLUSTERS) else None
+def cluster_members(clusters, use_extra=True):
+    """{identity: {demo protein: set of the other members of its cluster}}. With `use_extra`, a protein
+    from EXTRA_CLUSTERS gets the members of every cluster it was assigned to at that level; those
+    assignments hold for the CLUSTER_FILES clustering only."""
+    extra = pd.read_csv(EXTRA_CLUSTERS, sep='\t') if use_extra and os.path.exists(EXTRA_CLUSTERS) else None
     out = {}
     for identity, rep_of in clusters.items():
         out[identity] = {}
@@ -249,17 +298,101 @@ def cluster_members(clusters):
     return out
 
 
-def choose_fold(pid, partitions, members, own_identity):
-    """(fold, relation, {identity: cluster members in that fold's train/dev}) for one protein."""
+@functools.lru_cache(maxsize=None)
+def load_demo_hits(path):
+    """The hits of the demo proteins in an all-against-all search (all_vs_all_search.sh) with E-value at
+    most MAX_EVALUE, from either direction: protein, other, fident, and start / end (0-based, end
+    exclusive) of the aligned region on the demo protein."""
+    columns_file = os.path.join(os.path.dirname(path), 'all_vs_all_columns.txt')
+    with open(columns_file) as f:
+        columns = f.read().split()
+    ids, parts = set(DEMO), []
+    for chunk in pd.read_csv(path, sep='\t', header=None, names=columns, chunksize=2_000_000,
+                             usecols=['query', 'target', 'fident', 'qstart', 'qend', 'tstart', 'tend', 'evalue']):
+        chunk = chunk[(chunk['evalue'] <= MAX_EVALUE) & (chunk['query'] != chunk['target'])]
+        for side, other, start, end in (('query', 'target', 'qstart', 'qend'), ('target', 'query', 'tstart', 'tend')):
+            c = chunk[chunk[side].isin(ids)]
+            parts.append(pd.DataFrame({'protein': c[side], 'other': c[other], 'fident': c['fident'],
+                                       'start': c[start] - 1, 'end': c[end]}))
+    print(f'{path}: {sum(map(len, parts)):,} alignments of a demo protein')
+    return pd.concat(parts, ignore_index=True)
+
+
+def hit_files(data_dir, override):
+    """The all-against-all searches of a dataset: --hits, or every <data_dir>/similarity*/all_vs_all.m8."""
+    if override is not None:
+        return [p for p in override if p.lower() != 'none']
+    return sorted(glob.glob(os.path.join(data_dir, 'similarity*', 'all_vs_all.m8')))
+
+
+class HomologCoverage:
+    """Candidate residues and sites of the demo proteins inside the aligned region of a hit to a protein of a
+    fold's train/dev partition, from the union of the hits of several searches."""
+
+    def __init__(self, paths, info, residues):
+        self.hits = {}
+        if paths:
+            hits = pd.concat([load_demo_hits(p) for p in paths], ignore_index=True)
+            self.hits = {pid: g for pid, g in hits.groupby('protein')}
+        self.searched = bool(paths)
+        self.extra = info.extra
+        self.candidates, self.sites = {}, {}
+        for pid in DEMO:
+            seq = info.sequence[pid]
+            self.candidates[pid] = np.array([a in residues for a in seq])
+            self.sites[pid] = np.zeros(len(seq), dtype=bool)
+            self.sites[pid][[s for s in info.sites[pid] if seq[s] in residues]] = True
+
+    def known(self, pid):
+        return self.searched and pid not in self.extra
+
+    def __call__(self, pid, train, identity):
+        """{'homolog_fident', 'homologs', 'homolog_sites', 'homolog_cands'}: of the proteins of `train` with a
+        hit at or above `identity` % whose aligned region covers a candidate of `pid`, the highest identity
+        (0 if none) and their number, and the sites / candidates of `pid` those regions cover. NaN when unknown."""
+        if not self.known(pid):
+            return {'homolog_fident': np.nan, 'homologs': np.nan, 'homolog_sites': np.nan, 'homolog_cands': np.nan}
+        h = self.hits.get(pid)
+        cands = self.candidates[pid]
+        covered = np.zeros(len(cands), dtype=bool)
+        others, fident = set(), 0.0
+        if h is not None:
+            h = h[(h['fident'] >= identity / 100) & h['other'].isin(train)]
+            for other, f, start, end in zip(h['other'], h['fident'], h['start'], h['end']):
+                if cands[start:end].any():
+                    covered[start:end] = True
+                    others.add(other)
+                    fident = max(fident, float(f))
+        return {'homolog_fident': fident, 'homologs': len(others), 'homolog_sites': int((covered & self.sites[pid]).sum()),
+                'homolog_cands': int((covered & cands).sum())}
+
+    def max_fident(self, pid, train):
+        h = self.hits.get(pid) if self.known(pid) else None
+        if h is None:
+            return np.nan
+        h = h[h['other'].isin(train)]
+        return float(h['fident'].max()) if len(h) else 0.0
+
+
+def choose_fold(pid, partitions, members, own_identity, coverage):
+    """(fold, relation, {column: value}) for one protein. Folds are ranked by whether they trained on the
+    protein itself, then for each identity level, the run's own first: the identity of the closest train/dev
+    protein with a hit at that level aligned to a candidate of the protein, then the protein's sites, then its
+    candidates, inside the aligned regions of such hits, then its cluster members in train/dev."""
     order = [own_identity] + sorted(i for i in members if i != own_identity)
     best = None
     for fold, (train, test) in enumerate(partitions):
         counts = {i: len(members[i][pid] & train) for i in order}
-        key = (pid in train, *[counts[i] for i in order])
+        cover = {i: coverage(pid, train, i) for i in order}
+        key = (pid in train, *[x for i in order for x in (
+            *np.nan_to_num([cover[i][k] for k in ('homolog_fident', 'homolog_sites', 'homolog_cands')]), counts[i])])
         if best is None or key < best[0]:
-            best = (key, fold, counts)
-    _, fold, counts = best
+            best = (key, fold, counts, cover)
+    _, fold, counts, cover = best
     train, test = partitions[fold]
+    columns = {**{f'train_mates_{i}': counts[i] for i in sorted(counts)},
+               **{f'{k}_{i}': v for i in sorted(cover) for k, v in cover[i].items()},
+               'max_train_fident': coverage.max_fident(pid, train)}
     mates_in_splits = {p for p in members[own_identity][pid] if any(p in tr or p in te for tr, te in partitions)}
     if pid in test:
         relation = 'in test'
@@ -274,7 +407,14 @@ def choose_fold(pid, partitions, members, own_identity):
         relation = 'cluster not in splits'
     else:
         relation = 'cluster in train (no clean fold)'
-    return fold, relation, counts
+    # Under set cover only the centres are free of hits to each other, so a protein that is no centre can
+    # have homologs in every fold, outside its own cluster
+    own = cover[own_identity]
+    if own['homolog_cands'] > 0:
+        relation += (f', {own["homolog_sites"]} site(s) and {own["homolog_cands"]} candidate(s) aligned to '
+                     f'{own["homologs"]} train homolog(s) at {own_identity} %, closest {own["homolog_fident"]:.2f}'
+                     + ('' if 'no clean fold' in relation else ' (no clean fold)'))
+    return fold, relation, columns
 
 
 class PredictionFiles:
@@ -447,7 +587,7 @@ def score(group):
     return out
 
 
-def evaluate_run(run, variant, residue, cli, roots, info_cache, clusters, members, files):
+def evaluate_run(run, variant, residue, cli, roots, cache, files):
     """Rows of sites.csv and selection info for one run, or None if the run does not exist."""
     metadata, meta_dir = read_metadata(roots, run)
     if metadata is None:
@@ -458,14 +598,33 @@ def evaluate_run(run, variant, residue, cli, roots, info_cache, clusters, member
     if os.path.basename(str(args.get('dataset_path', ''))) != expected:
         raise SystemExit(f'{run} was trained on {args.get("dataset_path")}, not {expected}')
     residues = parse_residues(args['residues'])
-    identity = VARIANTS[variant]
-    if identity not in clusters:
-        raise SystemExit(f'cluster file {CLUSTER_FILES[identity]} for {variant} not found')
+    identity = parse_variant(variant)[0]
 
     info_path = args['prot_info_path']
-    if info_path not in info_cache:
-        info_cache[info_path] = ProteinInfo(info_path)
-    info = info_cache[info_path]
+    data_dir = os.path.dirname(info_path)
+    if info_path not in cache:
+        cache[info_path] = ProteinInfo(info_path)
+    info = cache[info_path]
+
+    paths = cluster_files(data_dir, variant, residue)
+    key = tuple(sorted(paths.items()))
+    if key not in cache:
+        clusters = load_clusters(paths)
+        if identity not in clusters:
+            raise SystemExit(f'cluster file {paths[identity]} for {variant} not found')
+        old = paths == {i: os.path.normpath(p) for i, p in CLUSTER_FILES.items()}
+        cache[key] = cluster_members(clusters, use_extra=old)
+    members = cache[key]
+
+    searches = hit_files(data_dir, cli.hits)
+    key = (tuple(searches), info_path, ''.join(residues))
+    if key not in cache:
+        if not searches:
+            print(f'note: no all-against-all search of {data_dir} (similarity*/all_vs_all.m8, or --hits); '
+                  f'folds are chosen by cluster membership only')
+        cache[key] = HomologCoverage(searches, info, residues)
+    coverage = cache[key]
+
     with open(args['dataset_path']) as f:
         splits = json.load(f)
     parent = info.parent_of
@@ -475,7 +634,7 @@ def evaluate_run(run, variant, residue, cli, roots, info_cache, clusters, member
         partitions.append((train, set(parent.loc[split['test']])))
 
     finished = metadata.get('fold_finished') or [True] * len(splits)
-    choice = {pid: choose_fold(pid, partitions, members, identity) for pid in DEMO}
+    choice = {pid: choose_fold(pid, partitions, members, identity, coverage) for pid in DEMO}
     unfinished = sorted({fold for fold, _, _ in choice.values() if not finished[fold]})
     if unfinished:
         print(f'note: {run} fold(s) {unfinished} are not finished, their proteins are skipped')
@@ -532,7 +691,7 @@ def evaluate_run(run, variant, residue, cli, roots, info_cache, clusters, member
 
     rows, selection = [], []
     for pid, (name, _) in DEMO.items():
-        fold, relation, counts = choice[pid]
+        fold, relation, columns = choice[pid]
         if not finished[fold]:
             continue
         candidates, (source, logits, coverage) = lookup(pid)
@@ -550,7 +709,7 @@ def evaluate_run(run, variant, residue, cli, roots, info_cache, clusters, member
                          'prob': prob, 'threshold': threshold, 'call': bool(prob >= threshold) if logit is not None else np.nan})
         selection.append({'variant': variant, 'identity': identity, 'model': residue, 'run': run, 'protein': name,
                           'uniprot': pid, 'fold': fold, 'relation': relation,
-                          **{f'train_mates_{i}': counts[i] for i in sorted(counts)},
+                          **columns,
                           'source': os.path.basename(source) if source else 'none', 'coverage': round(coverage, 3),
                           'threshold': round(threshold, 4), 'threshold_source': threshold_source})
     return rows, selection, todo
@@ -571,8 +730,13 @@ def main():
     parser.add_argument('--run', required=True,
                         help="Run directory name template with {res} and {variant}, e.g. 'finetuning_drop_{res}_2_650M_dbptm_{variant}'.")
     parser.add_argument('--residues', nargs='+', default=['S', 'T', 'Y'], help='Values of {res} (default: S T Y).')
-    parser.add_argument('--variants', nargs='+', default=list(VARIANTS), choices=list(VARIANTS),
-                        help='Values of {variant} (default: all three identity versions).')
+    parser.add_argument('--variants', nargs='+', default=DEFAULT_VARIANTS,
+                        help='Values of {variant}: chunked[_50|_70][<clustering suffix>]_max or chunked[_50|_70]_sc '
+                             '(default: chunked_max chunked_50_max chunked_70_max).')
+    parser.add_argument('--hits', nargs='+', default=None,
+                        help='All-against-all search results (all_vs_all.m8 with all_vs_all_columns.txt beside it) '
+                             'whose union decides which train proteins are homologs (default: every '
+                             'similarity*/all_vs_all.m8 next to the run\'s info file; "none" for cluster membership only).')
     parser.add_argument('--logs', default='logs', help='Root of the archived runs (default: logs).')
     parser.add_argument('--ckpt_root', default='new_logs',
                         help='Root holding <run>/fold_N/best.ckpt, also searched for predictions (default: new_logs).')
@@ -590,16 +754,19 @@ def main():
     if '{res}' not in cli.run:
         parser.error('--run needs a {res} placeholder')
     roots = [cli.logs, cli.ckpt_root]
-    clusters = load_clusters()
-    members = cluster_members(clusters)
+    for variant in cli.variants:
+        try:
+            parse_variant(variant)
+        except ValueError as e:
+            parser.error(str(e))
     files = PredictionFiles()
-    info_cache = {}
+    cache = {}
 
     site_rows, selection, uncovered = [], [], {}
     for variant in cli.variants:
         for residue in cli.residues:
             run = cli.run.format(res=residue, variant=variant)
-            result = evaluate_run(run, variant, residue, cli, roots, info_cache, clusters, members, files)
+            result = evaluate_run(run, variant, residue, cli, roots, cache, files)
             if result is None:
                 continue
             rows, sel, todo = result

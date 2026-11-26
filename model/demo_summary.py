@@ -70,8 +70,10 @@ def fold_kind(relation):
 MARKS = {'own test fold': '†', "test fold of its cluster's representative": '', 'no clean fold': '‡'}
 LEGEND = ("Every protein is scored by a fold that trained on no member of its cluster, usually the one whose test "
           "set holds the cluster's representative; † its own test fold, the protein being that representative (for "
-          "S+T: for both the S and the T model); ‡ no such fold exists, as the protein joins clusters that are in "
-          "different folds. The predictions are always the protein's own.")
+          "S+T: for both the S and the T model); ‡ no such fold exists: every fold trained on a member of its "
+          "cluster (the protein joins clusters in different folds) or on a homolog at the identity aligned to some of "
+          "its candidate residues, and the fold with the least similar such homolog, then the fewest such sites, is used. The predictions are always the "
+          "protein's own.")
 
 
 def fmt(x, digits=2):
